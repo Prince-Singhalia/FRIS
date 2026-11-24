@@ -1,0 +1,110 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-fris}
+      POSTGRES_USER: ${POSTGRES_USER:-fris}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-fris} -d ${POSTGRES_DB:-fris}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-fris}
+      POSTGRES_USER: ${POSTGRES_USER:-fris}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      SECRET_KEY: ${SECRET_KEY:-dev-secret-change-in-production}
+      ADMIN_DEFAULT_PASSWORD: ${ADMIN_DEFAULT_PASSWORD:-admin123}
+      PREFECT_API_URL: http://prefect-server:4200/api
+      OPENALEX_EMAIL: ${OPENALEX_EMAIL:-}
+      CROSSREF_MAILTO: ${CROSSREF_MAILTO:-}
+      ORCID_CLIENT_ID: ${ORCID_CLIENT_ID:-}
+      ORCID_CLIENT_SECRET: ${ORCID_CLIENT_SECRET:-}
+      SEMANTIC_SCHOLAR_API_KEY: ${SEMANTIC_SCHOLAR_API_KEY:-}
+      BACKEND_CORS_ORIGINS: "http://localhost:5173,http://localhost:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    command: >
+      sh -c "
+        cd /app &&
+        alembic upgrade head &&
+        python -c 'import asyncio; from app.seed.demo import seed_demo_data; from app.db.session import get_session_factory; asyncio.run((lambda: __import__(\"contextlib\").asynccontextmanager(lambda: (yield None)).__aenter__())())' ||
+        true &&
+        uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+      "
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_API_BASE_URL: http://localhost:8000
+    depends_on:
+      - api
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+
+  prefect-server:
+    image: prefecthq/prefect:3-latest
+    ports:
+      - "4200:4200"
+    environment:
+      PREFECT_SERVER_API_HOST: 0.0.0.0
+      PREFECT_SERVER_API_PORT: 4200
+    command: prefect server start
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:4200/api/health').raise_for_status()"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+
+  prefect-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      PREFECT_API_URL: http://prefect-server:4200/api
+      POSTGRES_HOST: db
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-fris}
+      POSTGRES_USER: ${POSTGRES_USER:-fris}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      SECRET_KEY: ${SECRET_KEY:-dev-secret-change-in-production}
+      OPENALEX_EMAIL: ${OPENALEX_EMAIL:-}
+      CROSSREF_MAILTO: ${CROSSREF_MAILTO:-}
+      ORCID_CLIENT_ID: ${ORCID_CLIENT_ID:-}
+      ORCID_CLIENT_SECRET: ${ORCID_CLIENT_SECRET:-}
+      SEMANTIC_SCHOLAR_API_KEY: ${SEMANTIC_SCHOLAR_API_KEY:-}
+    depends_on:
+      db:
+        condition: service_healthy
+      prefect-server:
+        condition: service_healthy
+    command: >
+      sh -c "
+        prefect work-pool create fris-pool --type process 2>/dev/null || true &&
+        prefect worker start --pool fris-pool
+      "
+
+volumes:
+  pgdata:
