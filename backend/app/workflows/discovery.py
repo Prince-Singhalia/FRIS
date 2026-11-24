@@ -8,6 +8,7 @@ deduplicates, and persists canonical records.
 from __future__ import annotations
 
 import hashlib
+import json
 import uuid
 from datetime import datetime, timezone
 
@@ -35,12 +36,14 @@ async def load_faculty_identity(faculty_id: str, tenant_id: str) -> dict:
 
     logger = get_run_logger()
     factory = get_session_factory()
+    faculty_uuid = uuid.UUID(faculty_id)
+    tenant_uuid = uuid.UUID(tenant_id)
 
     async with factory() as session:
         result = await session.execute(
             select(Faculty).where(
-                Faculty.id == faculty_id,
-                Faculty.tenant_id == tenant_id,
+                Faculty.id == faculty_uuid,
+                Faculty.tenant_id == tenant_uuid,
             )
         )
         faculty = result.scalar_one_or_none()
@@ -122,6 +125,7 @@ async def search_provider_authors(
         "request_count": result.request_count,
         "warnings": result.warnings,
         "errors": result.errors,
+        "retrieved_at": result.retrieved_at.isoformat() if result.retrieved_at else None,
     }
 
 
@@ -135,10 +139,16 @@ async def score_candidates(
     scored = []
 
     for provider_result in provider_results:
-        if provider_result["status"] not in ("succeeded",):
+        if provider_result["status"] not in ("succeeded", "partial"):
+            continue
+        # Crossref returns works from query.author; it is a supplementary
+        # metadata source, not an author-identity provider.
+        if provider_result["provider"] == "crossref":
             continue
 
         for candidate in provider_result["candidates"]:
+            if not candidate.get("provider_author_id"):
+                continue
             score_result = evaluate_author_candidate(
                 faculty_name=faculty_profile["full_name"],
                 faculty_orcid=faculty_profile.get("orcid"),
@@ -195,11 +205,16 @@ async def fetch_works_for_accepted(
 
         # Fetch first page of works
         result = await connector.fetch_author_works(author_id)
-        if result.status == "succeeded":
+        if result.status in {"succeeded", "partial"}:
             for work in result.records:
                 work["_candidate_score"] = candidate["score"]
                 work["_candidate_band"] = candidate["band"]
                 work["_candidate_id"] = author_id
+                work["_retrieved_at"] = (
+                    result.retrieved_at.isoformat()
+                    if result.retrieved_at
+                    else datetime.now(timezone.utc).isoformat()
+                )
                 all_works.append(work)
             logger.info(f"    Got {len(result.records)} works")
 
@@ -210,11 +225,16 @@ async def fetch_works_for_accepted(
                 if not cursor:
                     break
                 result = await connector.fetch_author_works(author_id, cursor=cursor)
-                if result.status == "succeeded":
+                if result.status in {"succeeded", "partial"}:
                     for work in result.records:
                         work["_candidate_score"] = candidate["score"]
                         work["_candidate_band"] = candidate["band"]
                         work["_candidate_id"] = author_id
+                        work["_retrieved_at"] = (
+                            result.retrieved_at.isoformat()
+                            if result.retrieved_at
+                            else datetime.now(timezone.utc).isoformat()
+                        )
                         all_works.append(work)
                     pages_fetched += 1
                 else:
@@ -315,6 +335,42 @@ async def deduplicate_works(raw_works: list[dict]) -> dict:
     }
 
 
+def _field_provenance(source_works: list[dict]) -> dict:
+    """Describe which provider supplied each populated canonical field."""
+    provenance: dict[str, dict] = {}
+    fields = (
+        "title", "doi", "publication_year", "publication_date", "venue",
+        "venue_issn", "publication_type", "abstract", "landing_url", "is_open_access",
+        "license", "citation_count",
+    )
+    for field in fields:
+        for work in source_works:
+            if work.get(field) is None:
+                continue
+            provenance[field] = {
+                "provider": work.get("provider"),
+                "provider_work_id": work.get("provider_work_id"),
+                "source_url": work.get("source_url") or work.get("landing_url"),
+                "retrieved_at": _work_retrieved_at(work).isoformat(),
+            }
+            break
+    return provenance
+
+
+def _work_retrieved_at(work: dict) -> datetime:
+    """Use the provider response retrieval time when available."""
+    value = work.get("_retrieved_at")
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    if isinstance(value, str):
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+        except ValueError:
+            pass
+    return datetime.now(timezone.utc)
+
+
 @task(name="persist_results")
 async def persist_results(
     job_id: str,
@@ -336,6 +392,9 @@ async def persist_results(
 
     logger = get_run_logger()
     factory = get_session_factory()
+    job_uuid = uuid.UUID(job_id)
+    faculty_uuid = uuid.UUID(faculty_id)
+    tenant_uuid = uuid.UUID(tenant_id)
 
     canonical_works = dedup_result["canonical_works"]
     sources_map = dedup_result["sources"]
@@ -349,17 +408,18 @@ async def persist_results(
     async with factory() as session:
         # Update job status to running
         job_result = await session.execute(
-            select(DiscoveryJob).where(DiscoveryJob.id == job_id)
+            select(DiscoveryJob).where(DiscoveryJob.id == job_uuid)
         )
         job = job_result.scalar_one_or_none()
         if job:
             job.status = JobStatus.running
-            job.started_at = datetime.now(timezone.utc)
+            job.started_at = job.started_at or datetime.now(timezone.utc)
 
-        # Save connector runs
+        # Save connector runs and retain their IDs for source-record provenance.
+        connector_runs: dict[str, ConnectorRun] = {}
         for ps in provider_statuses:
             cr = ConnectorRun(
-                job_id=uuid.UUID(job_id),
+                job_id=job_uuid,
                 provider=ps["provider"],
                 status=_map_connector_status(ps["status"]),
                 records_fetched=len(ps.get("candidates", [])),
@@ -371,13 +431,15 @@ async def persist_results(
                 warnings=ps.get("warnings"),
             )
             session.add(cr)
+            await session.flush()
+            connector_runs[ps["provider"]] = cr
 
         # Save author candidates and match decisions
         for candidate in scored_candidates:
             # Idempotent: check if candidate already exists
             existing = await session.execute(
                 select(AuthorCandidate).where(
-                    AuthorCandidate.faculty_id == faculty_id,
+                    AuthorCandidate.faculty_id == faculty_uuid,
                     AuthorCandidate.provider == candidate["provider"],
                     AuthorCandidate.provider_author_id == candidate["provider_author_id"],
                 )
@@ -385,8 +447,8 @@ async def persist_results(
             ac = existing.scalar_one_or_none()
             if not ac:
                 ac = AuthorCandidate(
-                    tenant_id=uuid.UUID(tenant_id),
-                    faculty_id=uuid.UUID(faculty_id),
+                    tenant_id=tenant_uuid,
+                    faculty_id=faculty_uuid,
                     provider=candidate["provider"],
                     provider_author_id=candidate["provider_author_id"],
                     display_name=candidate.get("display_name"),
@@ -394,12 +456,13 @@ async def persist_results(
                     provider_affiliation=candidate.get("provider_affiliation"),
                     works_count=candidate.get("works_count"),
                     source_url=candidate.get("source_url"),
-                    discovery_job_id=uuid.UUID(job_id),
+                    discovery_job_id=job_uuid,
                 )
                 session.add(ac)
                 await session.flush()
 
-            # Save match decision
+            # Save or update the latest decision for this candidate. Repeating
+            # identical provider input must not multiply decisions.
             band = candidate.get("band", "pending")
             status_map = {
                 "verified": MatchStatus.verified,
@@ -409,21 +472,42 @@ async def persist_results(
             }
             match_status = status_map.get(band, MatchStatus.pending)
 
-            md = MatchDecision(
-                author_candidate_id=ac.id,
-                faculty_id=uuid.UUID(faculty_id),
-                score=candidate.get("score", 0),
-                score_version=candidate.get("score_version", "1.0"),
-                status=match_status,
-                positive_evidence=candidate.get("positive_evidence"),
-                negative_evidence=candidate.get("negative_evidence"),
-                explanation=candidate.get("explanation"),
+            latest_decision_result = await session.execute(
+                select(MatchDecision)
+                .where(
+                    MatchDecision.author_candidate_id == ac.id,
+                    MatchDecision.faculty_id == faculty_uuid,
+                    MatchDecision.score_version == candidate.get("score_version", "1.0"),
+                )
+                .order_by(MatchDecision.created_at.desc())
+                .limit(1)
             )
-            session.add(md)
+            latest_decision = latest_decision_result.scalar_one_or_none()
+            if latest_decision:
+                new_score = candidate.get("score", 0)
+                if latest_decision.score != new_score or latest_decision.status != match_status:
+                    latest_decision.previous_status = latest_decision.status.value
+                    latest_decision.previous_score = latest_decision.score
+                    latest_decision.score = new_score
+                    latest_decision.status = match_status
+                    latest_decision.positive_evidence = candidate.get("positive_evidence")
+                    latest_decision.negative_evidence = candidate.get("negative_evidence")
+                    latest_decision.explanation = candidate.get("explanation")
+            else:
+                session.add(MatchDecision(
+                    author_candidate_id=ac.id,
+                    faculty_id=faculty_uuid,
+                    score=candidate.get("score", 0),
+                    score_version=candidate.get("score_version", "1.0"),
+                    status=match_status,
+                    positive_evidence=candidate.get("positive_evidence"),
+                    negative_evidence=candidate.get("negative_evidence"),
+                    explanation=candidate.get("explanation"),
+                ))
 
         # Save canonical publications
-        tid = uuid.UUID(tenant_id)
-        fid = uuid.UUID(faculty_id)
+        tid = tenant_uuid
+        fid = faculty_uuid
 
         for key, canon in canonical_works.items():
             norm_doi = canon.get("normalized_doi")
@@ -438,6 +522,31 @@ async def persist_results(
                     )
                 )
                 existing_pub = ep_result.scalar_one_or_none()
+            else:
+                # A provider work ID is a stable identity for a no-DOI record.
+                # Reuse its canonical row on a later flow run instead of
+                # creating a new publication for the same source record.
+                for source_work in sources_map.get(key, []):
+                    provider = source_work.get("provider")
+                    provider_work_id = source_work.get("provider_work_id")
+                    if not provider or not provider_work_id:
+                        continue
+                    existing_no_doi = await session.execute(
+                        select(Publication)
+                        .join(
+                            PublicationSource,
+                            PublicationSource.publication_id == Publication.id,
+                        )
+                        .where(
+                            Publication.tenant_id == tid,
+                            PublicationSource.provider == provider,
+                            PublicationSource.provider_work_id == provider_work_id,
+                        )
+                        .limit(1)
+                    )
+                    existing_pub = existing_no_doi.scalar_one_or_none()
+                    if existing_pub:
+                        break
 
             if existing_pub:
                 pub = existing_pub
@@ -459,6 +568,7 @@ async def persist_results(
                     landing_url=canon.get("landing_url"),
                     is_open_access=canon.get("is_open_access"),
                     citation_count=canon.get("citation_count"),
+                    field_provenance=_field_provenance(sources_map.get(key, [])),
                 )
                 session.add(pub)
                 await session.flush()
@@ -481,6 +591,59 @@ async def persist_results(
             for source_work in sources_map.get(key, []):
                 provider = source_work.get("provider", "unknown")
                 pwid = source_work.get("provider_work_id", "")
+                retrieved_at = _work_retrieved_at(source_work)
+                raw_payload = source_work.get("raw_data")
+                normalized_payload = {
+                    field: source_work.get(field)
+                    for field in (
+                        "title", "doi", "publication_year", "publication_date", "venue",
+                        "venue_issn", "publication_type", "landing_url", "is_open_access",
+                        "license", "citation_count", "authors",
+                    )
+                    if source_work.get(field) is not None
+                }
+                hash_input = raw_payload if raw_payload is not None else normalized_payload
+                payload_hash = hashlib.sha256(
+                    json.dumps(hash_input, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+                ).hexdigest()
+
+                source_record = None
+                if pwid:
+                    source_record_result = await session.execute(
+                        select(SourceRecord).where(
+                            SourceRecord.tenant_id == tid,
+                            SourceRecord.provider == provider,
+                            SourceRecord.provider_record_id == pwid,
+                        )
+                    )
+                    source_record = source_record_result.scalar_one_or_none()
+                    if source_record is None:
+                        source_record = SourceRecord(
+                            tenant_id=tid,
+                            provider=provider,
+                            provider_record_id=pwid,
+                            retrieved_at=retrieved_at,
+                            source_url=source_work.get("source_url") or source_work.get("landing_url"),
+                            payload_hash=payload_hash,
+                            # Store the provider's normalized fields. Raw payload retention
+                            # remains disabled until the provider's terms are reviewed.
+                            raw_payload=None,
+                            normalized_payload=normalized_payload,
+                            schema_version="1.0",
+                            connector_run_id=(
+                                connector_runs[provider].id if provider in connector_runs else None
+                            ),
+                        )
+                        session.add(source_record)
+                        await session.flush()
+                    else:
+                        source_record.retrieved_at = retrieved_at
+                        source_record.source_url = source_work.get("source_url") or source_work.get("landing_url")
+                        source_record.payload_hash = payload_hash
+                        source_record.normalized_payload = normalized_payload
+                        source_record.connector_run_id = (
+                            connector_runs[provider].id if provider in connector_runs else None
+                        )
 
                 # Idempotent source check
                 existing_src = await session.execute(
@@ -495,6 +658,7 @@ async def persist_results(
                         publication_id=pub.id,
                         provider=provider,
                         provider_work_id=pwid,
+                        source_record_id=source_record.id if source_record else None,
                         source_title=source_work.get("title"),
                         source_doi=source_work.get("doi"),
                         source_year=source_work.get("publication_year"),
@@ -502,7 +666,7 @@ async def persist_results(
                         source_type=source_work.get("publication_type"),
                         source_authors=source_work.get("authors"),
                         source_url=source_work.get("source_url"),
-                        retrieved_at=datetime.now(timezone.utc),
+                        retrieved_at=retrieved_at,
                     ))
                     sources_created += 1
 
@@ -545,13 +709,16 @@ async def persist_results(
 
         # Finalize job
         if job:
-            any_failed = any(ps["status"] == "failed" for ps in provider_statuses)
-            any_succeeded = any(ps["status"] == "succeeded" for ps in provider_statuses)
-            all_failed = all(ps["status"] in ("failed", "auth_failed", "not_configured") for ps in provider_statuses)
-
-            if all_failed:
+            successful = [
+                ps for ps in provider_statuses if ps["status"] in {"succeeded", "partial"}
+            ]
+            all_succeeded = bool(provider_statuses) and all(
+                ps["status"] == "succeeded" for ps in provider_statuses
+            )
+            if not successful:
                 job.status = JobStatus.failed
-            elif any_failed and any_succeeded:
+                job.error_detail = "No configured provider completed successfully"
+            elif not all_succeeded:
                 job.status = JobStatus.partial
             else:
                 job.status = JobStatus.succeeded
@@ -588,6 +755,25 @@ async def discovery_flow(
     tenant_id: str,
     selected_sources: list[str] | None = None,
 ) -> dict:
+    """Run discovery and persist a terminal failure state if the flow raises."""
+    try:
+        return await _execute_discovery_flow(
+            job_id=job_id,
+            faculty_id=faculty_id,
+            tenant_id=tenant_id,
+            selected_sources=selected_sources,
+        )
+    except Exception as error:
+        await _mark_discovery_failed(job_id, error)
+        raise
+
+
+async def _execute_discovery_flow(
+    job_id: str,
+    faculty_id: str,
+    tenant_id: str,
+    selected_sources: list[str] | None = None,
+) -> dict:
     """Execute the full research data discovery pipeline for one faculty member.
 
     Flow stages (per spec Section 6):
@@ -600,6 +786,7 @@ async def discovery_flow(
     """
     logger = get_run_logger()
     logger.info(f"Starting discovery for faculty {faculty_id}, job {job_id}")
+    await _mark_discovery_running(job_id)
 
     if selected_sources is None:
         selected_sources = ["openalex", "crossref", "semantic_scholar"]
@@ -621,6 +808,20 @@ async def discovery_flow(
 
     # 4. Fetch works from accepted candidates
     all_works = await fetch_works_for_accepted(scored_candidates)
+
+    # Crossref's author query yields work records rather than author profiles.
+    # Keep those records as supplementary DOI metadata; a Crossref-only record
+    # remains review-required and can never be auto-attributed from the query.
+    for provider_result in provider_results:
+        if provider_result["provider"] != "crossref" or provider_result["status"] not in {
+            "succeeded", "partial"
+        }:
+            continue
+        for work in provider_result["candidates"]:
+            work["_candidate_band"] = "review_required"
+            work["_candidate_score"] = None
+            work["_retrieved_at"] = provider_result.get("retrieved_at")
+            all_works.append(work)
 
     # 5. Deduplicate
     dedup_result = await deduplicate_works(all_works)
@@ -649,6 +850,43 @@ async def discovery_flow(
     return summary
 
 
+async def _mark_discovery_failed(job_id: str, error: Exception) -> None:
+    """Record orchestration failures that occur before result persistence."""
+    from sqlalchemy import select
+
+    from app.db.models import DiscoveryJob, JobStatus
+    from app.db.session import get_session_factory
+
+    async with get_session_factory()() as session:
+        result = await session.execute(
+            select(DiscoveryJob).where(DiscoveryJob.id == uuid.UUID(job_id))
+        )
+        job = result.scalar_one_or_none()
+        if job and job.status in {JobStatus.pending, JobStatus.running}:
+            job.status = JobStatus.failed
+            job.completed_at = datetime.now(timezone.utc)
+            job.error_detail = f"Discovery flow failed ({type(error).__name__})"
+            await session.commit()
+
+
+async def _mark_discovery_running(job_id: str) -> None:
+    """Move the database job out of pending as soon as the worker starts."""
+    from sqlalchemy import select
+
+    from app.db.models import DiscoveryJob, JobStatus
+    from app.db.session import get_session_factory
+
+    async with get_session_factory()() as session:
+        result = await session.execute(
+            select(DiscoveryJob).where(DiscoveryJob.id == uuid.UUID(job_id))
+        )
+        job = result.scalar_one_or_none()
+        if job and job.status == JobStatus.pending:
+            job.status = JobStatus.running
+            job.started_at = datetime.now(timezone.utc)
+            await session.commit()
+
+
 # ── Helpers ──────────────────────────────────────────────────────────────
 
 def _get_connector(provider_name: str):
@@ -668,6 +906,7 @@ def _map_connector_status(status_str: str):
     from app.db.models import ConnectorRunStatus
     mapping = {
         "succeeded": ConnectorRunStatus.succeeded,
+        "partial": ConnectorRunStatus.partial,
         "failed": ConnectorRunStatus.failed,
         "rate_limited": ConnectorRunStatus.rate_limited,
         "auth_failed": ConnectorRunStatus.auth_failed,

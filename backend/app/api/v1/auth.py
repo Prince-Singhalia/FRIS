@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import uuid
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel
@@ -16,7 +18,7 @@ from app.core.auth import (
     get_current_user,
     verify_password,
 )
-from app.db.models import User
+from app.db.models import Tenant, User
 from app.db.session import get_db
 from app.domain.schemas import TokenResponse, UserResponse
 
@@ -29,11 +31,19 @@ class RefreshRequest(BaseModel):
 
 @router.post("/login", response_model=TokenResponse)
 async def login(form: OAuth2PasswordRequestForm = Depends(), db: AsyncSession = Depends(get_db)):
-    # Tenant-aware login: if username contains '@tenant', parse it;
-    # otherwise search globally but fail if ambiguous.
+    # Tenant-specific login uses "tenant-slug/username". A bare username is
+    # accepted only when it identifies one active user across all tenants.
+    tenant_slug = None
     username = form.username
-    # Query all matching users (across tenants)
-    result = await db.execute(select(User).where(User.username == username, User.is_active == True))
+    if "/" in username:
+        tenant_slug, username = username.split("/", maxsplit=1)
+        if not tenant_slug or not username:
+            raise HTTPException(status_code=401, detail="Incorrect username or password")
+
+    query = select(User).where(User.username == username, User.is_active.is_(True))
+    if tenant_slug:
+        query = query.join(Tenant, User.tenant_id == Tenant.id).where(Tenant.slug == tenant_slug)
+    result = await db.execute(query)
     users = result.scalars().all()
 
     if len(users) == 0:
@@ -45,7 +55,7 @@ async def login(form: OAuth2PasswordRequestForm = Depends(), db: AsyncSession = 
     if len(users) > 1:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Username exists in multiple tenants. Use tenant-specific login.",
+            detail="Username exists in multiple tenants. Use tenant-slug/username.",
         )
 
     user = users[0]
@@ -76,8 +86,16 @@ async def refresh_token(body: RefreshRequest, db: AsyncSession = Depends(get_db)
     if not user_id or not tenant_id or not role:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token claims")
 
+    try:
+        user_uuid = uuid.UUID(user_id)
+        tenant_uuid = uuid.UUID(tenant_id)
+    except (TypeError, ValueError) as error:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token claims") from error
+
     # Verify user still exists and is active
-    result = await db.execute(select(User).where(User.id == user_id))
+    result = await db.execute(
+        select(User).where(User.id == user_uuid, User.tenant_id == tenant_uuid)
+    )
     user = result.scalar_one_or_none()
     if not user or not user.is_active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found or disabled")
@@ -92,7 +110,12 @@ async def get_me(
     current_user: TokenData = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(select(User).where(User.id == current_user.user_id))
+    result = await db.execute(
+        select(User).where(
+            User.id == uuid.UUID(current_user.user_id),
+            User.tenant_id == uuid.UUID(current_user.tenant_id),
+        )
+    )
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")

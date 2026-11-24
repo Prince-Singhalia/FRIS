@@ -4,7 +4,7 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-fris}
       POSTGRES_USER: ${POSTGRES_USER:-fris}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
     ports:
       - "5432:5432"
     volumes:
@@ -14,6 +14,69 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+
+  prefect-server:
+    image: prefecthq/prefect:3-latest
+    ports:
+      - "4200:4200"
+    environment:
+      PREFECT_SERVER_API_HOST: 0.0.0.0
+      PREFECT_SERVER_API_PORT: 4200
+    command: ["prefect", "server", "start", "--host", "0.0.0.0"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:4200/api/health').raise_for_status()"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+
+  prefect-bootstrap:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      PREFECT_API_URL: http://prefect-server:4200/api
+      PREFECT_WORK_POOL: ${PREFECT_WORK_POOL:-fris-pool}
+    depends_on:
+      prefect-server:
+        condition: service_healthy
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        if ! prefect work-pool inspect "$${PREFECT_WORK_POOL}" >/dev/null 2>&1; then
+          prefect work-pool create "$${PREFECT_WORK_POOL}" --type process
+        fi
+        prefect deploy app/workflows/discovery.py:discovery_flow \
+          --name manual \
+          --pool "$${PREFECT_WORK_POOL}" \
+          --concurrency-limit 1
+
+  prefect-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      PREFECT_API_URL: http://prefect-server:4200/api
+      POSTGRES_HOST: db
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-fris}
+      POSTGRES_USER: ${POSTGRES_USER:-fris}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env}
+      APP_ENV: ${APP_ENV:-development}
+      OPENALEX_EMAIL: ${OPENALEX_EMAIL:-}
+      CROSSREF_MAILTO: ${CROSSREF_MAILTO:-}
+      ORCID_CLIENT_ID: ${ORCID_CLIENT_ID:-}
+      ORCID_CLIENT_SECRET: ${ORCID_CLIENT_SECRET:-}
+      SEMANTIC_SCHOLAR_API_KEY: ${SEMANTIC_SCHOLAR_API_KEY:-}
+    depends_on:
+      db:
+        condition: service_healthy
+      prefect-server:
+        condition: service_healthy
+      prefect-bootstrap:
+        condition: service_completed_successfully
+    command: ["prefect", "worker", "start", "--pool", "${PREFECT_WORK_POOL:-fris-pool}"]
 
   api:
     build:
@@ -26,85 +89,29 @@ services:
       POSTGRES_PORT: 5432
       POSTGRES_DB: ${POSTGRES_DB:-fris}
       POSTGRES_USER: ${POSTGRES_USER:-fris}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
-      SECRET_KEY: ${SECRET_KEY:-dev-secret-change-in-production}
-      ADMIN_DEFAULT_PASSWORD: ${ADMIN_DEFAULT_PASSWORD:-admin123}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env}
+      APP_ENV: ${APP_ENV:-development}
+      BACKEND_HOST: 0.0.0.0
+      BACKEND_PORT: 8000
+      BACKEND_CORS_ORIGINS: ${BACKEND_CORS_ORIGINS:-http://localhost:5173,http://localhost:3000}
+      ADMIN_DEFAULT_PASSWORD: ${ADMIN_DEFAULT_PASSWORD:-CHANGE_ME_admin_password}
+      FRIS_SEED_DEMO: ${FRIS_SEED_DEMO:-false}
       PREFECT_API_URL: http://prefect-server:4200/api
+      PREFECT_DEPLOYMENT_NAME: ${PREFECT_DEPLOYMENT_NAME:-fris-discovery/manual}
       OPENALEX_EMAIL: ${OPENALEX_EMAIL:-}
       CROSSREF_MAILTO: ${CROSSREF_MAILTO:-}
       ORCID_CLIENT_ID: ${ORCID_CLIENT_ID:-}
       ORCID_CLIENT_SECRET: ${ORCID_CLIENT_SECRET:-}
       SEMANTIC_SCHOLAR_API_KEY: ${SEMANTIC_SCHOLAR_API_KEY:-}
-      BACKEND_CORS_ORIGINS: "http://localhost:5173,http://localhost:3000"
     depends_on:
       db:
         condition: service_healthy
+      prefect-bootstrap:
+        condition: service_completed_successfully
     volumes:
       - ./backend:/app
-    command: >
-      sh -c "
-        cd /app &&
-        alembic upgrade head &&
-        python -c 'import asyncio; from app.seed.demo import seed_demo_data; from app.db.session import get_session_factory; asyncio.run((lambda: __import__(\"contextlib\").asynccontextmanager(lambda: (yield None)).__aenter__())())' ||
-        true &&
-        uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-      "
-
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    ports:
-      - "5173:5173"
-    environment:
-      VITE_API_BASE_URL: http://localhost:8000
-    depends_on:
-      - api
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
-
-  prefect-server:
-    image: prefecthq/prefect:3-latest
-    ports:
-      - "4200:4200"
-    environment:
-      PREFECT_SERVER_API_HOST: 0.0.0.0
-      PREFECT_SERVER_API_PORT: 4200
-    command: prefect server start
-    healthcheck:
-      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:4200/api/health').raise_for_status()"]
-      interval: 10s
-      timeout: 10s
-      retries: 10
-
-  prefect-worker:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    environment:
-      PREFECT_API_URL: http://prefect-server:4200/api
-      POSTGRES_HOST: db
-      POSTGRES_PORT: 5432
-      POSTGRES_DB: ${POSTGRES_DB:-fris}
-      POSTGRES_USER: ${POSTGRES_USER:-fris}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
-      SECRET_KEY: ${SECRET_KEY:-dev-secret-change-in-production}
-      OPENALEX_EMAIL: ${OPENALEX_EMAIL:-}
-      CROSSREF_MAILTO: ${CROSSREF_MAILTO:-}
-      ORCID_CLIENT_ID: ${ORCID_CLIENT_ID:-}
-      ORCID_CLIENT_SECRET: ${ORCID_CLIENT_SECRET:-}
-      SEMANTIC_SCHOLAR_API_KEY: ${SEMANTIC_SCHOLAR_API_KEY:-}
-    depends_on:
-      db:
-        condition: service_healthy
-      prefect-server:
-        condition: service_healthy
-    command: >
-      sh -c "
-        prefect work-pool create fris-pool --type process 2>/dev/null || true &&
-        prefect worker start --pool fris-pool
-      "
+    command: ["python", "-m", "app.bootstrap"]
 
 volumes:
   pgdata:

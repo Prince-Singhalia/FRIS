@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from pydantic_settings import BaseSettings
-from pydantic import Field
 
 
 class Settings(BaseSettings):
@@ -13,6 +12,7 @@ class Settings(BaseSettings):
     app_name: str = "FRIS"
     app_version: str = "0.1.0"
     debug: bool = False
+    app_env: str = "development"
 
     # --- Database ---
     postgres_host: str = "localhost"
@@ -23,17 +23,29 @@ class Settings(BaseSettings):
 
     @property
     def database_url(self) -> str:
-        return (
-            f"postgresql+asyncpg://{self.postgres_user}:{self.postgres_password}"
-            f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
-        )
+        from sqlalchemy.engine import URL
+
+        return URL.create(
+            "postgresql+asyncpg",
+            username=self.postgres_user,
+            password=self.postgres_password,
+            host=self.postgres_host,
+            port=self.postgres_port,
+            database=self.postgres_db,
+        ).render_as_string(hide_password=False)
 
     @property
     def database_url_sync(self) -> str:
-        return (
-            f"postgresql+psycopg2://{self.postgres_user}:{self.postgres_password}"
-            f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
-        )
+        from sqlalchemy.engine import URL
+
+        return URL.create(
+            "postgresql+psycopg2",
+            username=self.postgres_user,
+            password=self.postgres_password,
+            host=self.postgres_host,
+            port=self.postgres_port,
+            database=self.postgres_db,
+        ).render_as_string(hide_password=False)
 
     # --- Auth / Security ---
     secret_key: str = "CHANGE-ME-IN-PRODUCTION"
@@ -50,6 +62,10 @@ class Settings(BaseSettings):
 
     # --- Prefect ---
     prefect_api_url: str = "http://localhost:4200/api"
+    prefect_deployment_name: str = "fris-discovery/manual"
+
+    # --- Explicit local/demo bootstrap ---
+    fris_seed_demo: bool = False
 
     # --- Provider keys (all optional) ---
     openalex_email: str = ""

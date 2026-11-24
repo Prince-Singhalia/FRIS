@@ -25,8 +25,9 @@ async def list_reviews(
     current_user: TokenData = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    tenant_id = uuid.UUID(current_user.tenant_id)
     base_q = select(ReviewItem).where(
-        ReviewItem.tenant_id == current_user.tenant_id,
+        ReviewItem.tenant_id == tenant_id,
         ReviewItem.status == status,
     )
     count_q = select(func.count()).select_from(base_q.subquery())
@@ -54,10 +55,11 @@ async def submit_decision(
     current_user: TokenData = Depends(require_roles("admin", "research_officer", "reviewer")),
     db: AsyncSession = Depends(get_db),
 ):
+    tenant_id = uuid.UUID(current_user.tenant_id)
     result = await db.execute(
         select(ReviewItem).where(
             ReviewItem.id == review_id,
-            ReviewItem.tenant_id == current_user.tenant_id,
+            ReviewItem.tenant_id == tenant_id,
         )
     )
     review = result.scalar_one_or_none()

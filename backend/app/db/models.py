@@ -68,6 +68,7 @@ class ConnectorRunStatus(str, enum.Enum):
     succeeded = "succeeded"
     failed = "failed"
     skipped = "skipped"
+    partial = "partial"
     auth_failed = "auth_failed"
     rate_limited = "rate_limited"
 
@@ -298,6 +299,8 @@ class DiscoveryJob(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     triggered_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
     correlation_id: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
     idempotency_key: Mapped[str | None] = mapped_column(String(255), nullable=True, unique=True)
+    prefect_flow_run_id: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    prefect_deployment_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     selected_sources: Mapped[list | None] = mapped_column(JSON, nullable=True)
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -380,7 +383,9 @@ class SourceRecord(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     )
 
     __table_args__ = (
-        UniqueConstraint("provider", "provider_record_id", name="uq_source_record_provider_id"),
+        UniqueConstraint(
+            "tenant_id", "provider", "provider_record_id", name="uq_source_record_tenant_provider_id"
+        ),
         Index("ix_source_record_tenant_provider", "tenant_id", "provider"),
     )
 

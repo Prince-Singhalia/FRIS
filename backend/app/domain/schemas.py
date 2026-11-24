@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import datetime
 from enum import Enum
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -77,12 +79,39 @@ class FacultyCreate(BaseModel):
     is_demo: bool = False
     demo_label: str | None = None
 
+    @field_validator("full_name")
+    @classmethod
+    def normalize_full_name(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("full_name is required")
+        return normalized
+
     @field_validator("orcid")
     @classmethod
     def validate_orcid_format(cls, v: str | None) -> str | None:
         if v is None or v == "":
             return None
         return validate_orcid(v)
+
+    @field_validator("profile_url")
+    @classmethod
+    def validate_profile_url(cls, value: str | None) -> str | None:
+        if value is None or not value.strip():
+            return None
+        parsed = urlsplit(value.strip())
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            raise ValueError("profile_url must be an absolute HTTP or HTTPS URL")
+        return value.strip()
+
+    @field_validator("institutional_email")
+    @classmethod
+    def validate_institutional_email(cls, value: str | None) -> str | None:
+        if value is None or not value.strip():
+            return None
+        if not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", value.strip()):
+            raise ValueError("institutional_email must be a valid email address")
+        return value.strip()
 
 
 class FacultyUpdate(BaseModel):
@@ -155,6 +184,7 @@ class CSVRowPreview(BaseModel):
     is_valid: bool
     errors: list[str] = Field(default_factory=list)
     duplicate_of: uuid.UUID | None = None
+    duplicate_in_upload: bool = False
 
 
 class CSVImportPreview(BaseModel):
@@ -187,6 +217,8 @@ class DiscoveryJobResponse(BaseModel):
     trigger_type: str
     triggered_by: str | None = None
     correlation_id: str
+    prefect_flow_run_id: str | None = None
+    prefect_deployment_name: str | None = None
     summary: str | None = None
     started_at: datetime | None = None
     completed_at: datetime | None = None

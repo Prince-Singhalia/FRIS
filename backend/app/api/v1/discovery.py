@@ -24,7 +24,8 @@ async def list_jobs(
     current_user: TokenData = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    base_q = select(DiscoveryJob).where(DiscoveryJob.tenant_id == current_user.tenant_id)
+    tenant_id = uuid.UUID(current_user.tenant_id)
+    base_q = select(DiscoveryJob).where(DiscoveryJob.tenant_id == tenant_id)
     if status:
         base_q = base_q.where(DiscoveryJob.status == status)
 
@@ -53,7 +54,7 @@ async def get_job(
     result = await db.execute(
         select(DiscoveryJob).where(
             DiscoveryJob.id == job_id,
-            DiscoveryJob.tenant_id == current_user.tenant_id,
+            DiscoveryJob.tenant_id == uuid.UUID(current_user.tenant_id),
         )
     )
     job = result.scalar_one_or_none()

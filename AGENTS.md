@@ -2,6 +2,8 @@
 
 ## Non-Negotiable Invariants
 
+Read [the implementation brief](docs/specifications/master-implementation-brief.md) before changing project architecture or integrations. The dated archive audit is a snapshot, not a source of current status; confirm its findings in code.
+
 1. **Inspect first.** Examine existing workspace, source files, Git state, runtimes before changes. Preserve user work.
 2. **Do not fake integrations.** No hard-coded publication lists, fabricated API responses, simulated success statuses in production paths. Mocks allowed only in tests and must be labelled.
 3. **Do not invent provider API behaviour.** Verify endpoint paths, parameters, auth, pagination against official docs before implementing. Record docs URL and date checked.
