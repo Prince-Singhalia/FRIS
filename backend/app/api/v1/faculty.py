@@ -30,11 +30,17 @@ from app.domain.schemas import (
     CSVImportPreview,
     CSVImportResult,
     CSVRowPreview,
+    DiscoveryJobResponse,
     FacultyCreate,
+    FacultyCreateResponse,
     FacultyResponse,
     FacultyUpdate,
     PaginatedResponse,
     validate_orcid,
+)
+from app.services.discovery_submission import (
+    enqueue_faculty_discoveries,
+    enqueue_faculty_discovery,
 )
 
 router = APIRouter()
@@ -118,7 +124,7 @@ async def _read_csv_upload(file: UploadFile) -> tuple[list[str], list[dict[str, 
         raise HTTPException(status_code=422, detail=f"Invalid CSV: {error}") from error
 
 
-@router.post("", response_model=FacultyResponse, status_code=201)
+@router.post("", response_model=FacultyCreateResponse, status_code=201)
 async def create_faculty(
     body: FacultyCreate,
     current_user: TokenData = Depends(require_roles("admin", "research_officer")),
@@ -213,7 +219,18 @@ async def create_faculty(
     await db.flush()
     # Reload with relationships
     await db.refresh(faculty, attribute_names=["identifiers", "name_variants", "affiliations"])
-    return faculty
+    discovery_job = await enqueue_faculty_discovery(
+        db,
+        faculty=faculty,
+        tenant_id=tenant_id,
+        user_id=uuid.UUID(current_user.user_id),
+        trigger_type="faculty_created",
+    )
+    faculty_data = FacultyResponse.model_validate(faculty).model_dump()
+    return FacultyCreateResponse(
+        **faculty_data,
+        discovery_job=DiscoveryJobResponse.model_validate(discovery_job),
+    )
 
 
 @router.get("", response_model=PaginatedResponse)
@@ -401,6 +418,7 @@ async def import_commit(
     skipped = 0
     errors_list: list[dict] = []
     seen_names: set[str] = set()
+    imported_faculty: list[Faculty] = []
 
     for i, raw_row in enumerate(raw_rows, start=2):
         data = _mapped_row(raw_row, headers_mapped)
@@ -444,6 +462,7 @@ async def import_commit(
         )
         db.add(faculty)
         await db.flush()
+        imported_faculty.append(faculty)
 
         if data.get("orcid"):
             db.add(
@@ -502,12 +521,21 @@ async def import_commit(
         )
     )
 
+    discovery_jobs = await enqueue_faculty_discoveries(
+        db,
+        faculties=imported_faculty,
+        tenant_id=tenant_id,
+        user_id=uuid.UUID(current_user.user_id),
+        trigger_type="faculty_imported",
+    )
+
     return CSVImportResult(
         batch_id=batch_id,
         imported_count=imported,
         skipped_count=skipped,
         error_count=len(errors_list),
         errors=errors_list,
+        discovery_jobs=[DiscoveryJobResponse.model_validate(job) for job in discovery_jobs],
     )
 
 

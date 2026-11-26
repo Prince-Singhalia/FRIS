@@ -10,7 +10,7 @@ FRIS is a free-first research intelligence system for discovering scholarly work
 | CSV intake | Implemented for current schema | Validates name, ORCID, profile URL, and email; persists previous affiliations; real tenant imports are not marked demo. |
 | Database | Initial migration added | Alembic bootstraps the SQLAlchemy model metadata for a clean database. |
 | Demo seed | Explicit and opt-in | Separate `FRIS Demo Tenant`, external-researcher label, password guard, and CSV-backed seed input. |
-| Discovery trigger | Wired to Prefect | Manual API trigger creates a job, submits a deployment run, and stores its Prefect run ID. |
+| Discovery trigger | Wired to Prefect | Faculty creation and successful CSV imports automatically create jobs; the API persists jobs before Prefect submission and reports failed submissions. Manual triggers remain available for retries. |
 | Provider adapters | Present, not live-verified here | OpenAlex, Crossref, ORCID, and Semantic Scholar modules are included. Credentials and provider behavior remain environment-dependent. |
 | Matching and deduplication | Partially implemented | Existing production services are wired into the discovery flow; conservative evidence and persistence hardening remain. |
 | Frontend | MVP implemented | Dashboard, faculty directory/profile, CSV preview/import, discovery jobs, review queue, and provider readiness screens use the versioned API. |
@@ -66,9 +66,9 @@ Run these commands from `backend/`. On Windows PowerShell, activate with `.\.ven
 
 ## Data intake and discovery
 
-Faculty may be created through `POST /api/v1/faculty` or imported through the CSV preview and commit routes. CSV list fields (`name_variants`, `previous_affiliations`, and `research_interests`) use semicolons between values. Previous affiliation values are stored as historical affiliations with `is_current=false`. The demo pilot CSV is in `backend/fixtures/pilot_faculty_seed.csv`.
+Faculty may be created through `POST /api/v1/faculty` or imported through the CSV preview and commit routes. Each newly created profile and each valid, unique imported row automatically creates a discovery job. The create response includes its job; the import response includes every generated job, including failed submissions. A Prefect submission failure leaves the faculty profile saved, marks its job failed, and reports that failure in the response. CSV list fields (`name_variants`, `previous_affiliations`, and `research_interests`) use semicolons between values. Previous affiliation values are stored as historical affiliations with `is_current=false`. The demo pilot CSV is in `backend/fixtures/pilot_faculty_seed.csv`.
 
-After faculty intake, an authorized admin or research officer can call `POST /api/v1/faculty/{faculty_id}/discover`. The API persists the job before submitting it to Prefect. If Prefect submission fails, the job is marked failed and the API returns `503`; it is not left pending. The worker runs the configured sources and writes connector/job outcomes. Provider responses are not considered verified merely because adapter code exists.
+An authorized admin or research officer can call `POST /api/v1/faculty/{faculty_id}/discover` to retry discovery after a prior job has finished or failed. The API persists each job before submitting it to Prefect. A failed manual submission returns `503` and retains a failed job rather than leaving a false pending record. The worker runs the configured sources and writes connector/job outcomes. Provider responses are not considered verified merely because adapter code exists.
 
 The demo researcher is Fei-Fei Li in a separate demo tenant and must remain labelled `DEMO — external researcher; not a member of the customer's university`. The seed includes identity data only and does not preload publications.
 

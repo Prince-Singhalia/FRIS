@@ -276,9 +276,13 @@ function FacultyPage({ onSelect, canManage }: { onSelect: (id: string) => void; 
   const { data, error, loading, refresh } = useRemote<Paginated<Faculty>>(load, [search])
 
   async function saveFaculty(input: FacultyInput) {
-    await createFaculty(input)
+    const created = await createFaculty(input)
     setDialog(null)
-    setNotice(`${input.full_name} was added to the faculty directory.`)
+    setNotice(
+      created.discovery_job.status === 'failed'
+        ? `${input.full_name} was added, but discovery could not be submitted. See Discovery jobs for details.`
+        : `${input.full_name} was added. Discovery job ${created.discovery_job.id.slice(0, 8)} is ${created.discovery_job.status}.`,
+    )
     refresh()
   }
 
@@ -345,7 +349,12 @@ function ImportDialog({ onClose, onComplete }: { onClose: () => void; onComplete
     setBusy(true); setError('')
     try {
       const result = await importFaculty(file)
-      onComplete(`Import complete: ${result.imported_count} added, ${result.skipped_count} skipped, ${result.error_count} issue${result.error_count === 1 ? '' : 's'}.`)
+      const failedJobs = result.discovery_jobs.filter((job) => job.status === 'failed').length
+      const submittedJobs = result.discovery_jobs.length - failedJobs
+      const discoveryNote = result.discovery_jobs.length
+        ? ` ${submittedJobs} discovery job${submittedJobs === 1 ? '' : 's'} submitted; ${failedJobs} submission${failedJobs === 1 ? '' : 's'} failed.`
+        : ''
+      onComplete(`Import complete: ${result.imported_count} added, ${result.skipped_count} skipped, ${result.error_count} issue${result.error_count === 1 ? '' : 's'}.${discoveryNote}`)
     } catch (reason) { setError(messageFrom(reason)) } finally { setBusy(false) }
   }
   return <Dialog title="Import faculty from CSV" onClose={onClose} wide>

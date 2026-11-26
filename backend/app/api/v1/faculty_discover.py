@@ -3,18 +3,16 @@
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import TokenData, require_roles
-from app.core.settings import get_settings
-from app.db.models import AuditAction, AuditEvent, DiscoveryJob, Faculty, JobStatus
+from app.db.models import DiscoveryJob, Faculty, JobStatus
 from app.db.session import get_db
 from app.domain.schemas import DiscoveryJobResponse
-from app.services.discovery_submission import submit_discovery_run
+from app.services.discovery_submission import enqueue_faculty_discovery
 
 router = APIRouter()
 
@@ -50,62 +48,21 @@ async def trigger_discovery(
             detail="A discovery job is already pending or running for this faculty member",
         )
 
-    correlation_id = f"disc-{faculty_id}-{uuid.uuid4().hex}"
-    selected_sources = ["openalex", "crossref", "semantic_scholar"]
-    deployment_name = get_settings().prefect_deployment_name
-    job = DiscoveryJob(
+    job = await enqueue_faculty_discovery(
+        db,
+        faculty=faculty,
         tenant_id=tid,
-        faculty_id=faculty_id,
-        status=JobStatus.pending,
+        user_id=uuid.UUID(current_user.user_id),
         trigger_type="manual",
-        triggered_by=current_user.user_id,
-        correlation_id=correlation_id,
-        idempotency_key=correlation_id,
-        prefect_deployment_name=deployment_name,
-        selected_sources=selected_sources,
     )
-    db.add(job)
-
-    # Audit
-    db.add(
-        AuditEvent(
-            tenant_id=tid,
-            user_id=uuid.UUID(current_user.user_id),
-            action=AuditAction.discovery_triggered,
-            entity_type="faculty",
-            entity_id=faculty_id,
-            detail={"job_correlation_id": correlation_id, "trigger": "manual"},
-        )
-    )
-
-    await db.flush()
-    job_id = str(job.id)
-    await db.commit()
-
-    try:
-        flow_run = await submit_discovery_run(
-            deployment_name=deployment_name,
-            job_id=job_id,
-            faculty_id=str(faculty_id),
-            tenant_id=str(tid),
-            selected_sources=selected_sources,
-            idempotency_key=correlation_id,
-        )
-    except Exception as error:
-        job.status = JobStatus.failed
-        job.completed_at = datetime.now(UTC)
-        job.error_detail = f"Prefect submission failed ({type(error).__name__})"
-        await db.commit()
+    if job.status == JobStatus.failed:
         raise HTTPException(
             status_code=503,
             detail={
                 "message": "Discovery could not be submitted to the configured Prefect deployment",
-                "job_id": job_id,
+                "job_id": str(job.id),
+                "error": job.error_detail,
             },
-        ) from error
-
-    job.prefect_flow_run_id = str(flow_run.id)
-    await db.commit()
-    await db.refresh(job, attribute_names=["connector_runs"])
+        )
 
     return job

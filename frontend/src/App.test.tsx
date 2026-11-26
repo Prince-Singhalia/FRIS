@@ -91,7 +91,23 @@ describe('App authentication flow', () => {
         { row_number: 3, data: { full_name: '' }, is_valid: false, errors: ['full_name is required'] },
       ],
     })
-    api.importFaculty.mockResolvedValue({ imported_count: 1, skipped_count: 0, error_count: 1 })
+    api.importFaculty.mockResolvedValue({
+      imported_count: 1,
+      skipped_count: 0,
+      error_count: 1,
+      discovery_jobs: [{
+        id: 'job-1',
+        faculty_id: 'faculty-1',
+        status: 'failed',
+        trigger_type: 'faculty_imported',
+        summary: null,
+        error_detail: 'Prefect submission failed',
+        created_at: '2026-01-01T00:00:00Z',
+        started_at: null,
+        completed_at: '2026-01-01T00:00:00Z',
+        connector_runs: [],
+      }],
+    })
     render(<App />)
     await screen.findByText('Good research starts with good evidence.')
     fireEvent.click(screen.getByRole('button', { name: 'Faculty' }))
@@ -106,7 +122,9 @@ describe('App authentication flow', () => {
     expect(importButton).toBeEnabled()
     fireEvent.click(importButton)
 
-    expect(await screen.findByRole('status')).toHaveTextContent('1 added, 0 skipped, 1 issue')
+    const status = await screen.findByRole('status')
+    expect(status).toHaveTextContent('1 added, 0 skipped, 1 issue')
+    expect(status).toHaveTextContent('0 discovery jobs submitted; 1 submission failed')
     expect(api.importFaculty).toHaveBeenCalledWith(file)
   })
 

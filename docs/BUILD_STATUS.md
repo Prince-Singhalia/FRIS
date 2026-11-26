@@ -26,6 +26,8 @@
 - Extended backend CI with Bandit, `pip-audit`, a runtime-image build and Trivy scan, and Gitleaks.
 - Resolved the backend mypy findings, added the `types-passlib` development stub dependency, and made mypy a CI gate.
 - Added PostgreSQL-backed auth integration coverage for ambiguous usernames, tenant-specific login, and cross-tenant `/auth/me` denial. CI runs it against a fresh PostgreSQL service after applying migrations.
+- Added automatic Prefect discovery enqueueing for newly created and successfully imported faculty. Jobs and audit events are committed before submission; submission failures remain visible as failed jobs in create/import responses. Manual discovery retains its HTTP 503 failure behavior.
+- Added PostgreSQL integration cases for automatic create/import enqueueing, persisted submission failures, CSV validation/affiliation/name-variant persistence, and cross-tenant faculty/dashboard/publication/discovery denials.
 - Built the React/TypeScript frontend against the existing API contracts: tenant login, dashboard, faculty directory and profiles, CSV preview/commit, publication provenance, discovery jobs, review decisions, and connector readiness.
 - Added responsive layouts, loading/error/empty states, role-aware action visibility, and no fabricated provider/publication records. The demo researcher is explicitly labelled external; confidence is displayed as a score.
 - Added an in-memory access/refresh token client, tenant-qualified OAuth form login, authenticated API requests, token refresh, and multipart CSV upload.
@@ -36,7 +38,8 @@
 
 Verified in the current continuation:
 
-- `backend/.venv/bin/python -m pytest -q`: **62 passed, 1 skipped** (Python 3.11.17; the PostgreSQL integration test was run separately).
+- `backend/.venv/bin/python -m pytest -q`: **63 passed, 4 skipped** (Python 3.11.17; the three new PostgreSQL intake tests and existing DB integration test were skipped because `FRIS_TEST_DATABASE_URL` is unset and Docker is unavailable in this environment).
+- Latest continuation backend Ruff and compile checks passed. The PostgreSQL-backed intake tests must still run in CI or against a disposable configured database before treating those cases as verified.
 - `backend/.venv/bin/python -m ruff check app tests`: passed.
 - `backend/.venv/bin/python -m compileall -q app tests`: passed.
 - `backend/.venv/bin/python -m mypy app`: passed for 40 source files.
@@ -73,8 +76,7 @@ Not verified / blocked:
 ### Aksh — backend/database/integration follow-up
 
 - Replace the metadata-driven initial revision with a frozen explicit baseline if the team wants immutable schema definitions before shipping.
-- Expand PostgreSQL API integration coverage for faculty import behavior, persistence idempotency, and Prefect submission failure/success; cross-tenant denial across other resource routes and repeat-run persistence remain unverified.
-- Decide and implement the approved auto-discovery behavior for newly created/imported faculty; the current API provides an explicit manual discovery trigger.
+- Run the new PostgreSQL intake integration cases in CI and extend integration coverage for publication persistence idempotency and repeated discovery runs.
 
 ### Prince — provider ingestion
 

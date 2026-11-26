@@ -126,7 +126,7 @@ export function getFacultyPublications(id: string) {
 }
 
 export function createFaculty(input: FacultyInput) {
-  return request<Faculty>('/faculty', { method: 'POST', body: JSON.stringify(input) })
+  return request<FacultyCreated>('/faculty', { method: 'POST', body: JSON.stringify(input) })
 }
 
 export function previewFacultyImport(file: File) {
@@ -212,6 +212,10 @@ export interface Faculty {
   identifiers: Array<{ id: string; identifier_type: string; value: string; is_verified: boolean }>
   name_variants: Array<{ id: string; variant_name: string; source?: string | null }>
   affiliations: Array<{ id: string; organization: string; department?: string | null; is_current: boolean; source?: string | null }>
+}
+
+export interface FacultyCreated extends Faculty {
+  discovery_job: Job
 }
 
 export interface FacultySummary {
@@ -312,4 +316,5 @@ export interface ImportResult {
   imported_count: number
   skipped_count: number
   error_count: number
+  discovery_jobs: Job[]
 }

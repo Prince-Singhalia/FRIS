@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from app.core.auth import hash_password
-from app.db.models import Tenant, User, UserRole
+from app.db.models import AuditEvent, DiscoveryJob, Faculty, Tenant, User, UserRole
 from app.db.session import get_db
 from app.main import app
 
@@ -102,6 +102,7 @@ async def auth_test_data(test_engine: AsyncEngine) -> AsyncIterator[dict[str, st
             "tenant_a_slug": tenant_a.slug,
             "tenant_b_id": str(tenant_b.id),
             "user_a_id": str(user_a.id),
+            "user_b_id": str(user_b.id),
             "password": password,
         }
 
@@ -109,8 +110,14 @@ async def auth_test_data(test_engine: AsyncEngine) -> AsyncIterator[dict[str, st
         yield data
     finally:
         async with session_factory() as session:
+            tenant_ids = [tenant_a.id, tenant_b.id]
+            await session.execute(delete(AuditEvent).where(AuditEvent.tenant_id.in_(tenant_ids)))
             await session.execute(
-                delete(User).where(User.tenant_id.in_([tenant_a.id, tenant_b.id]))
+                delete(DiscoveryJob).where(DiscoveryJob.tenant_id.in_(tenant_ids))
             )
-            await session.execute(delete(Tenant).where(Tenant.id.in_([tenant_a.id, tenant_b.id])))
+            await session.execute(delete(Faculty).where(Faculty.tenant_id.in_(tenant_ids)))
+            await session.execute(
+                delete(User).where(User.tenant_id.in_(tenant_ids))
+            )
+            await session.execute(delete(Tenant).where(Tenant.id.in_(tenant_ids)))
             await session.commit()

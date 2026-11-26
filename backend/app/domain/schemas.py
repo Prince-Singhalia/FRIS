@@ -200,14 +200,6 @@ class CSVImportPreview(BaseModel):
     headers_mapped: dict[str, str]
 
 
-class CSVImportResult(BaseModel):
-    batch_id: uuid.UUID
-    imported_count: int
-    skipped_count: int
-    error_count: int
-    errors: list[dict]
-
-
 # ---------------------------------------------------------------------------
 # Discovery Jobs
 # ---------------------------------------------------------------------------
@@ -231,6 +223,19 @@ class DiscoveryJobResponse(BaseModel):
     connector_runs: list[ConnectorRunResponse] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}
+
+
+class FacultyCreateResponse(FacultyResponse):
+    discovery_job: DiscoveryJobResponse
+
+
+class CSVImportResult(BaseModel):
+    batch_id: uuid.UUID
+    imported_count: int
+    skipped_count: int
+    error_count: int
+    errors: list[dict]
+    discovery_jobs: list[DiscoveryJobResponse] = Field(default_factory=list)
 
 
 class ConnectorRunResponse(BaseModel):
