@@ -26,6 +26,11 @@
 - Extended backend CI with Bandit, `pip-audit`, a runtime-image build and Trivy scan, and Gitleaks.
 - Resolved the backend mypy findings, added the `types-passlib` development stub dependency, and made mypy a CI gate.
 - Added PostgreSQL-backed auth integration coverage for ambiguous usernames, tenant-specific login, and cross-tenant `/auth/me` denial. CI runs it against a fresh PostgreSQL service after applying migrations.
+- Built the React/TypeScript frontend against the existing API contracts: tenant login, dashboard, faculty directory and profiles, CSV preview/commit, publication provenance, discovery jobs, review decisions, and connector readiness.
+- Added responsive layouts, loading/error/empty states, role-aware action visibility, and no fabricated provider/publication records. The demo researcher is explicitly labelled external; confidence is displayed as a score.
+- Added an in-memory access/refresh token client, tenant-qualified OAuth form login, authenticated API requests, token refresh, and multipart CSV upload.
+- Added frontend unit tests, TypeScript/lint/build checks, a non-root Nginx runtime image, Compose frontend service, and a frontend CI job that builds/scans the image and smoke-tests its served app.
+- Patched current Alpine runtime packages in the frontend image at build time after Trivy identified upstream-fixable base-image advisories; the rebuilt image has no HIGH or CRITICAL findings in the local Trivy scan.
 
 ## Validation and environment
 
@@ -46,6 +51,15 @@ Verified in the current continuation:
 - Manual API discovery submitted to Prefect and completed with job status `succeeded`. OpenAlex (1 record), Crossref (11 records), and Semantic Scholar (10 records) reported `succeeded` in that run. This was a real local worker run and live provider request, not a mock.
 - A first live run exposed the flow-result bug; the flow persisted a failed job as intended. After the fix, the rebuilt worker completed successfully.
 - After the PyJWT and runtime-image changes, the rebuilt API passed readiness, tenant-specific login and `/auth/me`; a new Prefect discovery run completed with `succeeded` and three connector runs.
+- `git diff --check`: passed.
+- `frontend/npm run build`: passed (TypeScript project build and Vite production bundle).
+- `frontend/npm test`: **7 passed** (authentication, CSV preview/commit, review decision, publication provenance, OAuth form encoding, bearer token attachment, and API error/session behavior).
+- `frontend/npm run lint`: passed with no diagnostics.
+- `frontend/npm run typecheck`: passed.
+- `docker build --tag fris-frontend:local ./frontend`: passed.
+- Frontend runtime smoke: the Nginx container served the FRIS document and proxied `/api/v1/auth/me` to the live API, which correctly returned HTTP 401 without credentials.
+- `trivy image --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 fris-frontend:local`: passed with **0 HIGH / CRITICAL** findings after the base-package update.
+- `docker compose config --quiet` with disposable Compose interpolation values: passed.
 - `git diff --check`: passed.
 
 Not verified / blocked:
@@ -73,8 +87,8 @@ Not verified / blocked:
 
 ### Shivanya — frontend and software CI/CD
 
-- Implement the React frontend and Dockerfile, then update Compose and CI to cover API, frontend, Prefect worker/flow, security scans, image builds, smoke tests, and rollback. No staging target is configured.
+- The frontend and frontend quality/image-smoke job are implemented. Remaining: broader end-to-end UI/API checks, scheduled Prefect deployment verification, release/deployment workflow, rollback procedure, and staging configuration. No staging target is configured.
 
 ## Key limitations
 
-There is no frontend, no end-to-end database/API test suite, no broad provider verification, and no configured staging deployment. The backend unit tests and Ruff checks pass, and one local worker run succeeded; broader database/API behavior remains unverified. The team should not describe FRIS as a complete or production-ready pilot until the integration gates in the implementation brief pass.
+The frontend is an API-backed MVP, not a fully validated production client. There is no end-to-end database/API UI test suite, no broad provider verification, and no configured staging deployment. The backend unit tests and frontend quality checks pass, and one local worker run succeeded; broader database/API behavior remains unverified. The team should not describe FRIS as a complete or production-ready pilot until the integration gates in the implementation brief pass.

@@ -1,4 +1,4 @@
-name: Backend quality
+name: FRIS quality
 
 on:
   push:
@@ -10,6 +10,47 @@ permissions:
   contents: read
 
 jobs:
+  frontend-quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        run: npm ci
+      - name: Run frontend lint
+        run: npm run lint
+      - name: Type-check frontend
+        run: npm run typecheck
+      - name: Run frontend tests
+        run: npm test
+      - name: Build frontend
+        run: npm run build
+      - name: Build frontend runtime image
+        run: docker build --tag fris-frontend:ci .
+      - name: Scan frontend runtime image
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: fris-frontend:ci
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+      - name: Smoke-test frontend runtime image
+        run: |
+          docker run --detach --name fris-frontend-smoke --publish 127.0.0.1:8080:8080 fris-frontend:ci
+          trap 'docker rm --force fris-frontend-smoke' EXIT
+          curl --retry 10 --retry-all-errors --retry-delay 2 --fail http://127.0.0.1:8080/ \
+            | grep -q 'FRIS · Research intelligence'
+
   postgres-integration:
     runs-on: ubuntu-latest
     timeout-minutes: 15

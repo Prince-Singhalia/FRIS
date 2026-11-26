@@ -1,6 +1,6 @@
 # Faculty Research Intelligence System (FRIS)
 
-FRIS is a free-first backend prototype for discovering scholarly works from permitted provider APIs, resolving author identities, deduplicating works, and preserving source evidence. The current repository implements a FastAPI/PostgreSQL backend and a Prefect discovery deployment. It does not include the planned React frontend or a production release pipeline.
+FRIS is a free-first research intelligence system for discovering scholarly works from permitted provider APIs, resolving author identities, deduplicating works, and preserving source evidence. The repository includes a FastAPI/PostgreSQL backend, a React/TypeScript frontend, and a Prefect discovery deployment. Production release and staging deployment are not configured.
 
 ## Current implementation
 
@@ -13,8 +13,8 @@ FRIS is a free-first backend prototype for discovering scholarly works from perm
 | Discovery trigger | Wired to Prefect | Manual API trigger creates a job, submits a deployment run, and stores its Prefect run ID. |
 | Provider adapters | Present, not live-verified here | OpenAlex, Crossref, ORCID, and Semantic Scholar modules are included. Credentials and provider behavior remain environment-dependent. |
 | Matching and deduplication | Partially implemented | Existing production services are wired into the discovery flow; conservative evidence and persistence hardening remain. |
-| Frontend | Not yet implemented | There is no frontend source or package manifest. |
-| Software CI/CD | Initial backend checks only | GitHub Actions runs compile, pytest, and Ruff; image release, staging, smoke tests, and rollback are not implemented. |
+| Frontend | MVP implemented | Dashboard, faculty directory/profile, CSV preview/import, discovery jobs, review queue, and provider readiness screens use the versioned API. |
+| Software CI/CD | Quality gates implemented | GitHub Actions runs backend and frontend checks, builds/scans runtime images, and smoke-tests the frontend image. Image release, staging deployment, and rollback are not configured. |
 
 See [the current build status](docs/BUILD_STATUS.md), [operations runbook](docs/operations-runbook.md), [implementation brief](docs/specifications/master-implementation-brief.md), and [dated repository audit](docs/archive/repository-audit-2026-11-24.md).
 
@@ -31,10 +31,11 @@ Requirements: Docker Desktop with Compose, or Python 3.11+ and PostgreSQL 16 for
 docker compose up --build
 ```
 
-The API waits for PostgreSQL health, applies Alembic migrations, optionally seeds demo data, then starts. Any migration or enabled seed failure stops startup. Compose registers the `fris-discovery/manual` Prefect deployment and starts a process worker. The frontend service is omitted until frontend files exist.
+The API waits for PostgreSQL health, applies Alembic migrations, optionally seeds demo data, then starts. Any migration or enabled seed failure stops startup. Compose registers the `fris-discovery/manual` Prefect deployment, starts a process worker, and serves the frontend on port 3000 by default. Override `FRONTEND_HOST_PORT` to change the published port.
 
 Local endpoints:
 
+- FRIS frontend: <http://localhost:3000>
 - API: <http://localhost:8000>
 - Swagger UI: <http://localhost:8000/docs>
 - Liveness: <http://localhost:8000/health/live>
@@ -42,6 +43,13 @@ Local endpoints:
 - Prefect UI: <http://localhost:4200>
 
 If demo seeding is enabled, sign in with username `fris-demo/admin` and the configured `ADMIN_DEFAULT_PASSWORD`. Tenant-specific login uses `tenant-slug/username`; a bare username works only when it is unique across tenants.
+
+For frontend development with Vite, run these commands from `frontend/`. The Vite development server proxies `/api` requests to `http://localhost:8000`; set `FRONTEND_API_PROXY_TARGET` if the backend is elsewhere.
+
+```sh
+npm ci
+npm run dev
+```
 
 For direct backend development:
 
@@ -75,6 +83,16 @@ python -m ruff check app tests
 ```
 
 These commands are run by the backend CI workflow. See [the current build status](docs/BUILD_STATUS.md) for the latest local test and container-verification results.
+
+From `frontend/`, run the UI quality checks:
+
+```sh
+npm ci
+npm run lint
+npm run typecheck
+npm test
+npm run build
+```
 
 ## Data sources and limits
 
