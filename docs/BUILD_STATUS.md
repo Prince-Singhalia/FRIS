@@ -25,17 +25,20 @@
 - Hardened the runtime image to install only application dependencies, remove pip/setuptools, and run without Uvicorn reload. Added a backend `.dockerignore` so local virtualenvs, tests, build output, and caches are not copied into runtime images.
 - Extended backend CI with Bandit, `pip-audit`, a runtime-image build and Trivy scan, and Gitleaks.
 - Resolved the backend mypy findings, added the `types-passlib` development stub dependency, and made mypy a CI gate.
+- Added PostgreSQL-backed auth integration coverage for ambiguous usernames, tenant-specific login, and cross-tenant `/auth/me` denial. CI runs it against a fresh PostgreSQL service after applying migrations.
 
 ## Validation and environment
 
 Verified in the current continuation:
 
-- `backend/.venv/bin/python -m pytest -q`: **62 passed** (Python 3.11.17).
+- `backend/.venv/bin/python -m pytest -q`: **62 passed, 1 skipped** (Python 3.11.17; the PostgreSQL integration test was run separately).
 - `backend/.venv/bin/python -m ruff check app tests`: passed.
 - `backend/.venv/bin/python -m compileall -q app tests`: passed.
 - `backend/.venv/bin/python -m mypy app`: passed for 40 source files.
 - `backend/.venv/bin/python -m bandit -q -r app`: passed. Bandit reports a warning for the scoped B104 suppression on the intentional container bind address.
 - `backend/.venv/bin/python -m pip_audit --skip-editable`: no known vulnerabilities.
+- PostgreSQL auth integration test: **1 passed** against the local PostgreSQL service; the test uses unique tenant/user rows and cleans them up.
+- Alembic `upgrade head` and `downgrade base`: passed against a newly created, disposable PostgreSQL database.
 - Built runtime image imports for PyJWT and the FastAPI application passed. Confirmed the image excludes `.venv`, tests, pip, and pytest; Trivy found no HIGH or CRITICAL vulnerabilities.
 - `docker compose config -q` with disposable local credentials: passed.
 - `docker compose up -d --build` with disposable local credentials and `POSTGRES_HOST_PORT=55432`: all services started; the database became healthy, migration revision `20261124_0001` was current, and API readiness returned `{"status":"ready","database":"connected"}`.
@@ -55,8 +58,8 @@ Not verified / blocked:
 
 ### Aksh — backend/database/integration follow-up
 
-- Run `alembic upgrade head` and `alembic downgrade base` against a clean PostgreSQL database. Replace the metadata-driven initial revision with a frozen explicit baseline if the team wants immutable schema definitions before shipping.
-- Add PostgreSQL API integration tests for cross-tenant denial, import behavior, persistence idempotency, and Prefect submission failure/success; repeat-run persistence has not yet been checked end to end.
+- Replace the metadata-driven initial revision with a frozen explicit baseline if the team wants immutable schema definitions before shipping.
+- Expand PostgreSQL API integration coverage for faculty import behavior, persistence idempotency, and Prefect submission failure/success; cross-tenant denial across other resource routes and repeat-run persistence remain unverified.
 - Decide and implement the approved auto-discovery behavior for newly created/imported faculty; the current API provides an explicit manual discovery trigger.
 
 ### Prince — provider ingestion
