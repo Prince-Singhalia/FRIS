@@ -49,7 +49,9 @@ class TenantAccessError(ForbiddenError):
         super().__init__("Cross-tenant access denied")
 
 
-async def fris_error_handler(request: Request, exc: FRISError) -> JSONResponse:
+async def fris_error_handler(request: Request, exc: Exception) -> JSONResponse:
+    if not isinstance(exc, FRISError):
+        raise exc
     return JSONResponse(
         status_code=exc.status_code,
         content={"error": exc.message, "detail": exc.detail},

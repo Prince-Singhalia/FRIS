@@ -80,7 +80,7 @@ class SemanticScholarConnector(BaseConnector):
     ) -> ConnectorResult:
         records = []
         request_count = 0
-        warnings = []
+        warnings: list[str] = []
 
         try:
             async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:

@@ -13,10 +13,11 @@ import json
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
+from typing import cast
 
 from prefect import flow, get_run_logger, task
 
-from app.connectors.base import ConnectorResult
+from app.connectors.base import BaseConnector, ConnectorResult
 from app.connectors.crossref import CrossrefConnector
 from app.connectors.openalex import OpenAlexConnector
 from app.connectors.orcid import ORCIDConnector
@@ -860,9 +861,9 @@ async def _execute_discovery_flow(
     for provider in selected_sources:
         provider_futures.append(search_provider_authors.submit(provider, faculty_profile))
 
-    provider_results = await _collect_provider_results(
-        [future.result for future in provider_futures]
-    )
+    # Prefect's runtime result() is synchronous despite its async return annotation.
+    result_callbacks = [cast(Callable[[], dict], future.result) for future in provider_futures]
+    provider_results = await _collect_provider_results(result_callbacks)
 
     # 3. Score candidates
     scored_candidates = await score_candidates(provider_results, faculty_profile)
@@ -954,19 +955,25 @@ async def _mark_discovery_running(job_id: str) -> None:
 
 def _get_connector(provider_name: str):
     """Get connector instance by provider name."""
-    connectors = {
+    connectors: dict[str, Callable[[], BaseConnector]] = {
         "openalex": OpenAlexConnector,
         "crossref": CrossrefConnector,
         "semantic_scholar": SemanticScholarConnector,
         "orcid": ORCIDConnector,
     }
-    cls = connectors.get(provider_name)
-    return cls() if cls else None
+    connector_factory = connectors.get(provider_name)
+    return connector_factory() if connector_factory else None
 
 
 async def _collect_provider_results(result_callbacks: list[Callable[[], dict]]) -> list[dict]:
     """Wait for Prefect's synchronous future results without blocking the flow loop."""
-    return await asyncio.gather(*(asyncio.to_thread(result) for result in result_callbacks))
+    async def collect_result(callback: Callable[[], dict]) -> dict:
+        result = await asyncio.to_thread(callback)
+        if not isinstance(result, dict):
+            raise TypeError("Prefect provider task returned a non-dictionary result")
+        return result
+
+    return await asyncio.gather(*(collect_result(callback) for callback in result_callbacks))
 
 
 def _map_connector_status(status_str: str):

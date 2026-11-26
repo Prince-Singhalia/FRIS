@@ -29,6 +29,8 @@ jobs:
         run: python -m pytest -q
       - name: Run Ruff
         run: python -m ruff check app tests
+      - name: Run mypy
+        run: python -m mypy app
       - name: Run Bandit
         run: python -m bandit -q -r app
       - name: Audit Python dependencies

@@ -96,7 +96,7 @@ class OpenAlexConnector(BaseConnector):
         """
         records = []
         warnings = []
-        errors = []
+        errors: list[str] = []
         request_count = 0
 
         try:

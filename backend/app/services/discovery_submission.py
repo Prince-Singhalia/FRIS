@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from inspect import isawaitable
 from typing import Any
 
 
@@ -22,7 +23,7 @@ async def submit_discovery_run(
     """
     from prefect.deployments import run_deployment
 
-    return await run_deployment(
+    flow_run = run_deployment(
         name=deployment_name,
         parameters={
             "job_id": job_id,
@@ -34,3 +35,4 @@ async def submit_discovery_run(
         idempotency_key=idempotency_key,
         as_subflow=False,
     )
+    return await flow_run if isawaitable(flow_run) else flow_run

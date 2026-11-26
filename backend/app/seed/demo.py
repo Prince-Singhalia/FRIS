@@ -51,8 +51,8 @@ async def seed_demo_data(db: AsyncSession) -> None:
         raise RuntimeError(f"Pilot seed file is missing a faculty row: {PILOT_SEED_PATH}")
 
     # --- Tenant ---
-    result = await db.execute(select(Tenant).where(Tenant.slug == DEMO_TENANT_SLUG))
-    tenant = result.scalar_one_or_none()
+    tenant_result = await db.execute(select(Tenant).where(Tenant.slug == DEMO_TENANT_SLUG))
+    tenant: Tenant | None = tenant_result.scalar_one_or_none()
     if not tenant:
         tenant = Tenant(
             name=DEMO_TENANT_NAME,
@@ -66,10 +66,10 @@ async def seed_demo_data(db: AsyncSession) -> None:
         logger.info("seed_tenant_exists", tenant=DEMO_TENANT_NAME)
 
     # --- Admin user ---
-    result = await db.execute(
+    admin_result = await db.execute(
         select(User).where(User.tenant_id == tenant.id, User.username == "admin")
     )
-    admin = result.scalar_one_or_none()
+    admin: User | None = admin_result.scalar_one_or_none()
     if not admin:
         admin = User(
             tenant_id=tenant.id,
@@ -87,13 +87,13 @@ async def seed_demo_data(db: AsyncSession) -> None:
         logger.info("seed_admin_exists", username="admin")
 
     # --- Pilot researcher ---
-    result = await db.execute(
+    pilot_result = await db.execute(
         select(Faculty).where(
             Faculty.tenant_id == tenant.id,
             Faculty.full_name == pilot_data["faculty_name"].strip(),
         )
     )
-    pilot = result.scalar_one_or_none()
+    pilot: Faculty | None = pilot_result.scalar_one_or_none()
     if not pilot:
         pilot = Faculty(
             tenant_id=tenant.id,

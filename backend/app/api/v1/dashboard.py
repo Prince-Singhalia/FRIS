@@ -68,7 +68,7 @@ async def dashboard_overview(
         .order_by(Publication.publication_year)
     )
     year_rows = (await db.execute(year_q)).all()
-    pub_years = {row[0]: row[1] for row in year_rows}
+    pub_years = {year: count for year, count in year_rows if year is not None}
 
     # Connector statuses from connectors module
     from app.api.v1.connectors import DEFAULT_CONNECTORS

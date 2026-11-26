@@ -24,14 +24,16 @@
 - Replaced `python-jose` with PyJWT, retained the explicit JWT algorithm allowlist, and added token round-trip and invalid-token tests. Raised pytest and setuptools constraints to versions that address the dependency advisories.
 - Hardened the runtime image to install only application dependencies, remove pip/setuptools, and run without Uvicorn reload. Added a backend `.dockerignore` so local virtualenvs, tests, build output, and caches are not copied into runtime images.
 - Extended backend CI with Bandit, `pip-audit`, a runtime-image build and Trivy scan, and Gitleaks.
+- Resolved the backend mypy findings, added the `types-passlib` development stub dependency, and made mypy a CI gate.
 
 ## Validation and environment
 
 Verified in the current continuation:
 
-- `backend/.venv/bin/python -m pytest -q`: **61 passed** (Python 3.11.17).
+- `backend/.venv/bin/python -m pytest -q`: **62 passed** (Python 3.11.17).
 - `backend/.venv/bin/python -m ruff check app tests`: passed.
 - `backend/.venv/bin/python -m compileall -q app tests`: passed.
+- `backend/.venv/bin/python -m mypy app`: passed for 40 source files.
 - `backend/.venv/bin/python -m bandit -q -r app`: passed. Bandit reports a warning for the scoped B104 suppression on the intentional container bind address.
 - `backend/.venv/bin/python -m pip_audit --skip-editable`: no known vulnerabilities.
 - Built runtime image imports for PyJWT and the FastAPI application passed. Confirmed the image excludes `.venv`, tests, pip, and pytest; Trivy found no HIGH or CRITICAL vulnerabilities.
@@ -45,7 +47,6 @@ Verified in the current continuation:
 
 Not verified / blocked:
 
-- `mypy app` reports 33 existing type errors across auth, settings, API response construction, seeding, and discovery submission; mypy is not currently a CI gate.
 - Gitleaks is configured in CI but has not been run locally.
 - The default host port 5432 is occupied by an unrelated local container; FRIS was verified on host port 55432. The unrelated container was left untouched.
 - Broader PostgreSQL API integration, cross-tenant denial, failure injection, repeated-run persistence, and staging remain unverified.
@@ -54,7 +55,6 @@ Not verified / blocked:
 
 ### Aksh — backend/database/integration follow-up
 
-- Resolve the 33 mypy findings and add a supported type-check gate after those errors are fixed.
 - Run `alembic upgrade head` and `alembic downgrade base` against a clean PostgreSQL database. Replace the metadata-driven initial revision with a frozen explicit baseline if the team wants immutable schema definitions before shipping.
 - Add PostgreSQL API integration tests for cross-tenant denial, import behavior, persistence idempotency, and Prefect submission failure/success; repeat-run persistence has not yet been checked end to end.
 - Decide and implement the approved auto-discovery behavior for newly created/imported faculty; the current API provides an explicit manual discovery trigger.

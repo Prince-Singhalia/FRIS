@@ -2,18 +2,30 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from typing import TypedDict
+
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import TokenData, get_current_user
-from app.core.settings import get_settings
+from app.core.settings import Settings, get_settings
 from app.db.session import get_db
 from app.domain.schemas import ConnectorStatusResponse
 
 router = APIRouter()
 
+
+class ConnectorDefinition(TypedDict):
+    provider: str
+    display_name: str
+    terms_url: str
+    capabilities: dict[str, bool]
+    credential_check: Callable[[Settings], bool]
+
+
 # Default connectors and their credential requirements
-DEFAULT_CONNECTORS = [
+DEFAULT_CONNECTORS: list[ConnectorDefinition] = [
     {
         "provider": "openalex",
         "display_name": "OpenAlex",
