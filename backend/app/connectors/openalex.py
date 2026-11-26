@@ -15,13 +15,13 @@ Auth: No key required; email recommended for polite pool
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import httpx
 
 from app.connectors.base import BaseConnector, ConnectorResult
-from app.core.settings import get_settings
 from app.core.logging import get_logger
+from app.core.settings import get_settings
 
 logger = get_logger(__name__)
 
@@ -31,7 +31,6 @@ MAX_PER_PAGE = 50
 
 
 class OpenAlexConnector(BaseConnector):
-
     @property
     def provider_name(self) -> str:
         return "openalex"
@@ -69,9 +68,15 @@ class OpenAlexConnector(BaseConnector):
         try:
             async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
                 params = self._get_params()
-                resp = await client.get(f"{OPENALEX_API_BASE}/authors", params={**params, "search": "test", "per_page": "1"})
+                resp = await client.get(
+                    f"{OPENALEX_API_BASE}/authors",
+                    params={**params, "search": "test", "per_page": "1"},
+                )
                 if resp.status_code == 200:
-                    return {"status": "healthy", "response_time_ms": resp.elapsed.total_seconds() * 1000}
+                    return {
+                        "status": "healthy",
+                        "response_time_ms": resp.elapsed.total_seconds() * 1000,
+                    }
                 return {"status": "unhealthy", "status_code": resp.status_code}
         except Exception as e:
             return {"status": "unhealthy", "error": str(e)}
@@ -127,7 +132,9 @@ class OpenAlexConnector(BaseConnector):
                     for name in names_to_search:
                         params = {**base_params, "search": name, "per_page": "10"}
                         if institution:
-                            params["filter"] = f"last_known_institutions.display_name.search:{institution}"
+                            params["filter"] = (
+                                f"last_known_institutions.display_name.search:{institution}"
+                            )
 
                         request_count += 1
                         resp = await client.get(f"{OPENALEX_API_BASE}/authors", params=params)
@@ -137,7 +144,9 @@ class OpenAlexConnector(BaseConnector):
                             for author in data.get("results", []):
                                 # Avoid duplicate candidates
                                 author_id = author.get("id", "")
-                                if not any(r.get("provider_author_id") == author_id for r in records):
+                                if not any(
+                                    r.get("provider_author_id") == author_id for r in records
+                                ):
                                     records.append(self._normalize_author(author))
                         elif resp.status_code == 429:
                             warnings.append(f"Rate limited during name search for '{name}'")
@@ -151,7 +160,7 @@ class OpenAlexConnector(BaseConnector):
                 request_count=request_count,
                 warnings=warnings,
                 errors=errors,
-                retrieved_at=datetime.now(timezone.utc),
+                retrieved_at=datetime.now(UTC),
             )
 
         except httpx.TimeoutException as e:
@@ -224,20 +233,26 @@ class OpenAlexConnector(BaseConnector):
                 pagination=pagination,
                 request_count=request_count,
                 errors=errors,
-                retrieved_at=datetime.now(timezone.utc),
+                retrieved_at=datetime.now(UTC),
             )
 
         except httpx.TimeoutException as e:
-            return ConnectorResult(status="failed", request_count=request_count, errors=[f"Timeout: {e}"])
+            return ConnectorResult(
+                status="failed", request_count=request_count, errors=[f"Timeout: {e}"]
+            )
         except Exception as e:
-            return ConnectorResult(status="failed", request_count=request_count, errors=[f"Error: {e}"])
+            return ConnectorResult(
+                status="failed", request_count=request_count, errors=[f"Error: {e}"]
+            )
 
     async def lookup_work_by_doi(self, doi: str) -> ConnectorResult:
         """Look up a work by DOI."""
         try:
             async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
                 params = self._get_params()
-                resp = await client.get(f"{OPENALEX_API_BASE}/works/https://doi.org/{doi}", params=params)
+                resp = await client.get(
+                    f"{OPENALEX_API_BASE}/works/https://doi.org/{doi}", params=params
+                )
 
                 if resp.status_code == 200:
                     work = resp.json()
@@ -245,7 +260,7 @@ class OpenAlexConnector(BaseConnector):
                         status="succeeded",
                         records=[self._normalize_work(work)],
                         request_count=1,
-                        retrieved_at=datetime.now(timezone.utc),
+                        retrieved_at=datetime.now(UTC),
                     )
                 elif resp.status_code == 404:
                     return ConnectorResult(status="succeeded", records=[], request_count=1)
@@ -275,7 +290,9 @@ class OpenAlexConnector(BaseConnector):
             "provider_affiliation": "; ".join(affiliations) if affiliations else None,
             "works_count": raw.get("works_count"),
             "cited_by_count": raw.get("cited_by_count"),
-            "source_url": raw.get("id", "").replace("https://openalex.org/", "https://api.openalex.org/"),
+            "source_url": raw.get("id", "").replace(
+                "https://openalex.org/", "https://api.openalex.org/"
+            ),
             "raw_data": raw,
         }
 
@@ -290,16 +307,17 @@ class OpenAlexConnector(BaseConnector):
         for i, authorship in enumerate(raw.get("authorships", [])):
             author = authorship.get("author", {})
             orcid_raw = author.get("orcid") or ""
-            authors.append({
-                "position": i,
-                "name": author.get("display_name", ""),
-                "orcid": orcid_raw.replace("https://orcid.org/", "").strip() or None,
-                "provider_author_id": author.get("id", ""),
-                "affiliation": "; ".join(
-                    inst.get("display_name", "")
-                    for inst in authorship.get("institutions", [])
-                ),
-            })
+            authors.append(
+                {
+                    "position": i,
+                    "name": author.get("display_name", ""),
+                    "orcid": orcid_raw.replace("https://orcid.org/", "").strip() or None,
+                    "provider_author_id": author.get("id", ""),
+                    "affiliation": "; ".join(
+                        inst.get("display_name", "") for inst in authorship.get("institutions", [])
+                    ),
+                }
+            )
 
         # Venue/source
         primary_location = raw.get("primary_location") or {}

@@ -5,12 +5,12 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from app.api.v1.auth import router as auth_router
-from app.api.v1.faculty import router as faculty_router
-from app.api.v1.discovery import router as discovery_router
 from app.api.v1.connectors import router as connectors_router
-from app.api.v1.reviews import router as reviews_router
 from app.api.v1.dashboard import router as dashboard_router
+from app.api.v1.discovery import router as discovery_router
+from app.api.v1.faculty import router as faculty_router
 from app.api.v1.faculty_discover import router as faculty_discover_router
+from app.api.v1.reviews import router as reviews_router
 
 api_router = APIRouter()
 

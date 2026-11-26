@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
-from jose import JWTError, jwt
-from passlib.context import CryptContext
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
+from jose import JWTError, jwt
+from passlib.context import CryptContext
 
 from app.core.settings import get_settings
 
@@ -34,7 +34,7 @@ def create_access_token(
     settings = get_settings()
     if expires_delta is None:
         expires_delta = timedelta(minutes=settings.access_token_expire_minutes)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     payload = {
         "sub": subject,
         "tenant_id": tenant_id,
@@ -50,7 +50,7 @@ def create_access_token(
 def create_refresh_token(subject: str, tenant_id: str, role: str) -> str:
     settings = get_settings()
     expires_delta = timedelta(days=settings.refresh_token_expire_days)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     payload = {
         "sub": subject,
         "tenant_id": tenant_id,
@@ -73,7 +73,7 @@ def decode_token(token: str) -> dict:
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=f"Invalid token: {e}",
             headers={"WWW-Authenticate": "Bearer"},
-        )
+        ) from e
 
 
 class TokenData:
@@ -89,8 +89,8 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> TokenData:
     """Validate access token (rejects refresh tokens)."""
     payload = decode_token(token)
     # Enforce token type — refresh tokens must not be used as access tokens
-    token_type = payload.get("type")
-    if token_type != "access":
+    claim_type = payload.get("type")
+    if claim_type != "access":
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token type: expected access token",

@@ -10,19 +10,18 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-from prefect import flow, task, get_run_logger
+from prefect import flow, get_run_logger, task
 
 from app.connectors.base import ConnectorResult
-from app.connectors.openalex import OpenAlexConnector
 from app.connectors.crossref import CrossrefConnector
-from app.connectors.semantic_scholar import SemanticScholarConnector
+from app.connectors.openalex import OpenAlexConnector
 from app.connectors.orcid import ORCIDConnector
+from app.connectors.semantic_scholar import SemanticScholarConnector
+from app.services.deduplication import should_consider_no_doi_merge
 from app.services.matching import evaluate_author_candidate
 from app.services.normalization import normalize_doi, normalize_title
-from app.services.deduplication import should_merge_by_doi, should_consider_no_doi_merge
-
 
 # ── Prefect tasks ────────────────────────────────────────────────────────
 
@@ -30,9 +29,10 @@ from app.services.deduplication import should_merge_by_doi, should_consider_no_d
 @task(name="load_faculty_identity", retries=1)
 async def load_faculty_identity(faculty_id: str, tenant_id: str) -> dict:
     """Load faculty identity, aliases, identifiers from DB."""
-    from app.db.session import get_session_factory
-    from app.db.models import Faculty, FacultyIdentifier, FacultyNameVariant, FacultyAffiliation
     from sqlalchemy import select
+
+    from app.db.models import Faculty, FacultyAffiliation, FacultyIdentifier, FacultyNameVariant
+    from app.db.session import get_session_factory
 
     logger = get_run_logger()
     factory = get_session_factory()
@@ -74,10 +74,12 @@ async def load_faculty_identity(faculty_id: str, tenant_id: str) -> dict:
         if ident.identifier_type.value == "orcid":
             orcid = ident.value
         if ident.is_verified:
-            verified_ids.append({
-                "provider": ident.identifier_type.value,
-                "value": ident.value,
-            })
+            verified_ids.append(
+                {
+                    "provider": ident.identifier_type.value,
+                    "value": ident.value,
+                }
+            )
 
     profile = {
         "faculty_id": str(faculty.id),
@@ -108,7 +110,12 @@ async def search_provider_authors(
 
     connector = _get_connector(provider_name)
     if connector is None:
-        return {"provider": provider_name, "status": "not_configured", "candidates": [], "errors": [f"No connector for {provider_name}"]}
+        return {
+            "provider": provider_name,
+            "status": "not_configured",
+            "candidates": [],
+            "errors": [f"No connector for {provider_name}"],
+        }
 
     result: ConnectorResult = await connector.search_author_candidates(
         faculty_name=faculty_profile["full_name"],
@@ -160,16 +167,18 @@ async def score_candidates(
                 verified_provider_ids=faculty_profile.get("verified_ids"),
             )
 
-            scored.append({
-                **candidate,
-                "score": score_result["score"],
-                "band": score_result["band"],
-                "positive_evidence": score_result["positive_evidence"],
-                "negative_evidence": score_result["negative_evidence"],
-                "explanation": score_result["explanation"],
-                "score_version": score_result["score_version"],
-                "has_contradiction": score_result["has_contradiction"],
-            })
+            scored.append(
+                {
+                    **candidate,
+                    "score": score_result["score"],
+                    "band": score_result["band"],
+                    "positive_evidence": score_result["positive_evidence"],
+                    "negative_evidence": score_result["negative_evidence"],
+                    "explanation": score_result["explanation"],
+                    "score_version": score_result["score_version"],
+                    "has_contradiction": score_result["has_contradiction"],
+                }
+            )
             logger.info(
                 f"  Candidate {candidate.get('display_name')} ({candidate.get('provider')}): "
                 f"score={score_result['score']}, band={score_result['band']}"
@@ -189,7 +198,10 @@ async def fetch_works_for_accepted(
 
     for candidate in scored_candidates:
         if candidate["score"] < min_score_for_works:
-            logger.info(f"  Skipping works for {candidate.get('display_name')} (score {candidate['score']} < {min_score_for_works})")
+            logger.info(
+                f"  Skipping works for {candidate.get('display_name')} "
+                f"(score {candidate['score']} < {min_score_for_works})"
+            )
             continue
 
         provider = candidate.get("provider")
@@ -213,7 +225,7 @@ async def fetch_works_for_accepted(
                 work["_retrieved_at"] = (
                     result.retrieved_at.isoformat()
                     if result.retrieved_at
-                    else datetime.now(timezone.utc).isoformat()
+                    else datetime.now(UTC).isoformat()
                 )
                 all_works.append(work)
             logger.info(f"    Got {len(result.records)} works")
@@ -233,7 +245,7 @@ async def fetch_works_for_accepted(
                         work["_retrieved_at"] = (
                             result.retrieved_at.isoformat()
                             if result.retrieved_at
-                            else datetime.now(timezone.utc).isoformat()
+                            else datetime.now(UTC).isoformat()
                         )
                         all_works.append(work)
                     pages_fetched += 1
@@ -281,21 +293,25 @@ async def deduplicate_works(raw_works: list[dict]) -> dict:
                 if not canon_title:
                     continue
                 merge_decision = should_consider_no_doi_merge(
-                    title, canonical_work.get("title", ""),
-                    year, canonical_work.get("publication_year"),
+                    title,
+                    canonical_work.get("title", ""),
+                    year,
+                    canonical_work.get("publication_year"),
                 )
                 if merge_decision == "merge":
                     matched_key = key
                     break
                 elif merge_decision == "review":
-                    review_items.append({
-                        "type": "dedup_ambiguous",
-                        "work_a_title": canonical_work.get("title"),
-                        "work_b_title": title,
-                        "work_a_provider": canonical_work.get("provider"),
-                        "work_b_provider": work.get("provider"),
-                        "similarity": "high_but_below_threshold",
-                    })
+                    review_items.append(
+                        {
+                            "type": "dedup_ambiguous",
+                            "work_a_title": canonical_work.get("title"),
+                            "work_b_title": title,
+                            "work_a_provider": canonical_work.get("provider"),
+                            "work_b_provider": work.get("provider"),
+                            "similarity": "high_but_below_threshold",
+                        }
+                    )
 
         if matched_key:
             # Merge: add this as a source
@@ -339,9 +355,18 @@ def _field_provenance(source_works: list[dict]) -> dict:
     """Describe which provider supplied each populated canonical field."""
     provenance: dict[str, dict] = {}
     fields = (
-        "title", "doi", "publication_year", "publication_date", "venue",
-        "venue_issn", "publication_type", "abstract", "landing_url", "is_open_access",
-        "license", "citation_count",
+        "title",
+        "doi",
+        "publication_year",
+        "publication_date",
+        "venue",
+        "venue_issn",
+        "publication_type",
+        "abstract",
+        "landing_url",
+        "is_open_access",
+        "license",
+        "citation_count",
     )
     for field in fields:
         for work in source_works:
@@ -361,14 +386,14 @@ def _work_retrieved_at(work: dict) -> datetime:
     """Use the provider response retrieval time when available."""
     value = work.get("_retrieved_at")
     if isinstance(value, datetime):
-        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+        return value if value.tzinfo else value.replace(tzinfo=UTC)
     if isinstance(value, str):
         try:
             parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-            return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+            return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
         except ValueError:
             pass
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 @task(name="persist_results")
@@ -381,14 +406,23 @@ async def persist_results(
     provider_statuses: list[dict],
 ) -> dict:
     """Persist canonical publications, sources, matches, and job status."""
-    from app.db.session import get_session_factory
-    from app.db.models import (
-        DiscoveryJob, ConnectorRun, ConnectorRunStatus,
-        SourceRecord, AuthorCandidate, MatchDecision, MatchStatus,
-        Publication, PublicationSource, Authorship,
-        FacultyPublicationMatch, ReviewItem, JobStatus,
-    )
     from sqlalchemy import select
+
+    from app.db.models import (
+        AuthorCandidate,
+        Authorship,
+        ConnectorRun,
+        DiscoveryJob,
+        FacultyPublicationMatch,
+        JobStatus,
+        MatchDecision,
+        MatchStatus,
+        Publication,
+        PublicationSource,
+        ReviewItem,
+        SourceRecord,
+    )
+    from app.db.session import get_session_factory
 
     logger = get_run_logger()
     factory = get_session_factory()
@@ -407,13 +441,11 @@ async def persist_results(
 
     async with factory() as session:
         # Update job status to running
-        job_result = await session.execute(
-            select(DiscoveryJob).where(DiscoveryJob.id == job_uuid)
-        )
+        job_result = await session.execute(select(DiscoveryJob).where(DiscoveryJob.id == job_uuid))
         job = job_result.scalar_one_or_none()
         if job:
             job.status = JobStatus.running
-            job.started_at = job.started_at or datetime.now(timezone.utc)
+            job.started_at = job.started_at or datetime.now(UTC)
 
         # Save connector runs and retain their IDs for source-record provenance.
         connector_runs: dict[str, ConnectorRun] = {}
@@ -425,8 +457,8 @@ async def persist_results(
                 records_fetched=len(ps.get("candidates", [])),
                 records_valid=len(ps.get("candidates", [])),
                 request_count=ps.get("request_count", 0),
-                started_at=datetime.now(timezone.utc),
-                completed_at=datetime.now(timezone.utc),
+                started_at=datetime.now(UTC),
+                completed_at=datetime.now(UTC),
                 error_message="; ".join(ps.get("errors", [])) or None,
                 warnings=ps.get("warnings"),
             )
@@ -494,16 +526,18 @@ async def persist_results(
                     latest_decision.negative_evidence = candidate.get("negative_evidence")
                     latest_decision.explanation = candidate.get("explanation")
             else:
-                session.add(MatchDecision(
-                    author_candidate_id=ac.id,
-                    faculty_id=faculty_uuid,
-                    score=candidate.get("score", 0),
-                    score_version=candidate.get("score_version", "1.0"),
-                    status=match_status,
-                    positive_evidence=candidate.get("positive_evidence"),
-                    negative_evidence=candidate.get("negative_evidence"),
-                    explanation=candidate.get("explanation"),
-                ))
+                session.add(
+                    MatchDecision(
+                        author_candidate_id=ac.id,
+                        faculty_id=faculty_uuid,
+                        score=candidate.get("score", 0),
+                        score_version=candidate.get("score_version", "1.0"),
+                        status=match_status,
+                        positive_evidence=candidate.get("positive_evidence"),
+                        negative_evidence=candidate.get("negative_evidence"),
+                        explanation=candidate.get("explanation"),
+                    )
+                )
 
         # Save canonical publications
         tid = tenant_uuid
@@ -576,16 +610,18 @@ async def persist_results(
 
                 # Add authorships
                 for author in canon.get("authors", []):
-                    session.add(Authorship(
-                        publication_id=pub.id,
-                        author_position=author.get("position"),
-                        author_name=author.get("name", "Unknown"),
-                        source_spelling=author.get("name"),
-                        provider=canon.get("provider"),
-                        orcid=author.get("orcid"),
-                        provider_author_id=author.get("provider_author_id"),
-                        raw_affiliation=author.get("affiliation"),
-                    ))
+                    session.add(
+                        Authorship(
+                            publication_id=pub.id,
+                            author_position=author.get("position"),
+                            author_name=author.get("name", "Unknown"),
+                            source_spelling=author.get("name"),
+                            provider=canon.get("provider"),
+                            orcid=author.get("orcid"),
+                            provider_author_id=author.get("provider_author_id"),
+                            raw_affiliation=author.get("affiliation"),
+                        )
+                    )
 
             # Add source records for this publication
             for source_work in sources_map.get(key, []):
@@ -596,15 +632,26 @@ async def persist_results(
                 normalized_payload = {
                     field: source_work.get(field)
                     for field in (
-                        "title", "doi", "publication_year", "publication_date", "venue",
-                        "venue_issn", "publication_type", "landing_url", "is_open_access",
-                        "license", "citation_count", "authors",
+                        "title",
+                        "doi",
+                        "publication_year",
+                        "publication_date",
+                        "venue",
+                        "venue_issn",
+                        "publication_type",
+                        "landing_url",
+                        "is_open_access",
+                        "license",
+                        "citation_count",
+                        "authors",
                     )
                     if source_work.get(field) is not None
                 }
                 hash_input = raw_payload if raw_payload is not None else normalized_payload
                 payload_hash = hashlib.sha256(
-                    json.dumps(hash_input, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+                    json.dumps(
+                        hash_input, sort_keys=True, separators=(",", ":"), default=str
+                    ).encode("utf-8")
                 ).hexdigest()
 
                 source_record = None
@@ -623,7 +670,8 @@ async def persist_results(
                             provider=provider,
                             provider_record_id=pwid,
                             retrieved_at=retrieved_at,
-                            source_url=source_work.get("source_url") or source_work.get("landing_url"),
+                            source_url=source_work.get("source_url")
+                            or source_work.get("landing_url"),
                             payload_hash=payload_hash,
                             # Store the provider's normalized fields. Raw payload retention
                             # remains disabled until the provider's terms are reviewed.
@@ -638,7 +686,9 @@ async def persist_results(
                         await session.flush()
                     else:
                         source_record.retrieved_at = retrieved_at
-                        source_record.source_url = source_work.get("source_url") or source_work.get("landing_url")
+                        source_record.source_url = source_work.get("source_url") or source_work.get(
+                            "landing_url"
+                        )
                         source_record.payload_hash = payload_hash
                         source_record.normalized_payload = normalized_payload
                         source_record.connector_run_id = (
@@ -654,20 +704,22 @@ async def persist_results(
                     )
                 )
                 if not existing_src.scalar_one_or_none():
-                    session.add(PublicationSource(
-                        publication_id=pub.id,
-                        provider=provider,
-                        provider_work_id=pwid,
-                        source_record_id=source_record.id if source_record else None,
-                        source_title=source_work.get("title"),
-                        source_doi=source_work.get("doi"),
-                        source_year=source_work.get("publication_year"),
-                        source_venue=source_work.get("venue"),
-                        source_type=source_work.get("publication_type"),
-                        source_authors=source_work.get("authors"),
-                        source_url=source_work.get("source_url"),
-                        retrieved_at=retrieved_at,
-                    ))
+                    session.add(
+                        PublicationSource(
+                            publication_id=pub.id,
+                            provider=provider,
+                            provider_work_id=pwid,
+                            source_record_id=source_record.id if source_record else None,
+                            source_title=source_work.get("title"),
+                            source_doi=source_work.get("doi"),
+                            source_year=source_work.get("publication_year"),
+                            source_venue=source_work.get("venue"),
+                            source_type=source_work.get("publication_type"),
+                            source_authors=source_work.get("authors"),
+                            source_url=source_work.get("source_url"),
+                            retrieved_at=retrieved_at,
+                        )
+                    )
                     sources_created += 1
 
             # Faculty-publication match (idempotent)
@@ -686,26 +738,33 @@ async def persist_results(
                     "rejected": MatchStatus.rejected,
                 }.get(candidate_band, MatchStatus.review_required)
 
-                session.add(FacultyPublicationMatch(
-                    faculty_id=fid,
-                    publication_id=pub.id,
-                    tenant_id=tid,
-                    status=match_status,
-                    confidence_score=canon.get("_candidate_score"),
-                ))
+                session.add(
+                    FacultyPublicationMatch(
+                        faculty_id=fid,
+                        publication_id=pub.id,
+                        tenant_id=tid,
+                        status=match_status,
+                        confidence_score=canon.get("_candidate_score"),
+                    )
+                )
                 matches_created += 1
 
         # Save review items
         for ri_data in review_items_data:
-            session.add(ReviewItem(
-                tenant_id=tid,
-                review_type="dedup_ambiguous",
-                entity_type="publication",
-                entity_id=uuid.uuid4(),  # placeholder
-                status="pending",
-                evidence=ri_data,
-                explanation=f"Ambiguous duplicate: {ri_data.get('work_a_title', '')[:80]} vs {ri_data.get('work_b_title', '')[:80]}",
-            ))
+            session.add(
+                ReviewItem(
+                    tenant_id=tid,
+                    review_type="dedup_ambiguous",
+                    entity_type="publication",
+                    entity_id=uuid.uuid4(),  # placeholder
+                    status="pending",
+                    evidence=ri_data,
+                    explanation=(
+                        f"Ambiguous duplicate: {ri_data.get('work_a_title', '')[:80]} "
+                        f"vs {ri_data.get('work_b_title', '')[:80]}"
+                    ),
+                )
+            )
 
         # Finalize job
         if job:
@@ -723,7 +782,7 @@ async def persist_results(
             else:
                 job.status = JobStatus.succeeded
 
-            job.completed_at = datetime.now(timezone.utc)
+            job.completed_at = datetime.now(UTC)
             job.summary = (
                 f"Publications: {pubs_created} new, {pubs_existing} existing. "
                 f"Sources: {sources_created}. Matches: {matches_created}. "
@@ -797,9 +856,7 @@ async def _execute_discovery_flow(
     # 2. Search providers in parallel
     provider_futures = []
     for provider in selected_sources:
-        provider_futures.append(
-            search_provider_authors.submit(provider, faculty_profile)
-        )
+        provider_futures.append(search_provider_authors.submit(provider, faculty_profile))
 
     provider_results = [await f.result() for f in provider_futures]
 
@@ -814,7 +871,8 @@ async def _execute_discovery_flow(
     # remains review-required and can never be auto-attributed from the query.
     for provider_result in provider_results:
         if provider_result["provider"] != "crossref" or provider_result["status"] not in {
-            "succeeded", "partial"
+            "succeeded",
+            "partial",
         }:
             continue
         for work in provider_result["candidates"]:
@@ -864,7 +922,7 @@ async def _mark_discovery_failed(job_id: str, error: Exception) -> None:
         job = result.scalar_one_or_none()
         if job and job.status in {JobStatus.pending, JobStatus.running}:
             job.status = JobStatus.failed
-            job.completed_at = datetime.now(timezone.utc)
+            job.completed_at = datetime.now(UTC)
             job.error_detail = f"Discovery flow failed ({type(error).__name__})"
             await session.commit()
 
@@ -883,11 +941,12 @@ async def _mark_discovery_running(job_id: str) -> None:
         job = result.scalar_one_or_none()
         if job and job.status == JobStatus.pending:
             job.status = JobStatus.running
-            job.started_at = datetime.now(timezone.utc)
+            job.started_at = datetime.now(UTC)
             await session.commit()
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────
+
 
 def _get_connector(provider_name: str):
     """Get connector instance by provider name."""
@@ -904,6 +963,7 @@ def _get_connector(provider_name: str):
 def _map_connector_status(status_str: str):
     """Map string status to ConnectorRunStatus enum."""
     from app.db.models import ConnectorRunStatus
+
     mapping = {
         "succeeded": ConnectorRunStatus.succeeded,
         "partial": ConnectorRunStatus.partial,

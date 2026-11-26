@@ -13,24 +13,22 @@ Auth: Requires registered client credentials (client_id/client_secret) and
 
 from __future__ import annotations
 
-import hashlib
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import httpx
 
 from app.connectors.base import BaseConnector, ConnectorResult
-from app.core.settings import get_settings
 from app.core.logging import get_logger
+from app.core.settings import get_settings
 
 logger = get_logger(__name__)
 
 ORCID_API_BASE = "https://pub.orcid.org/v3.0"
-ORCID_TOKEN_URL = "https://orcid.org/oauth/token"
+ORCID_TOKEN_URL = "https://orcid.org/oauth/token"  # noqa: S105
 DEFAULT_TIMEOUT = httpx.Timeout(connect=10.0, read=30.0, write=10.0, pool=10.0)
 
 
 class ORCIDConnector(BaseConnector):
-
     def __init__(self):
         self._access_token: str | None = None
 
@@ -120,12 +118,17 @@ class ORCIDConnector(BaseConnector):
         if not self._is_configured():
             return ConnectorResult(
                 status="auth_failed",
-                errors=["ORCID client credentials not configured (ORCID_CLIENT_ID / ORCID_CLIENT_SECRET)"],
+                errors=[
+                    "ORCID client credentials not configured "
+                    "(ORCID_CLIENT_ID / ORCID_CLIENT_SECRET)"
+                ],
             )
 
         token = await self._get_token()
         if not token:
-            return ConnectorResult(status="auth_failed", errors=["Could not obtain ORCID access token"])
+            return ConnectorResult(
+                status="auth_failed", errors=["Could not obtain ORCID access token"]
+            )
 
         try:
             async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
@@ -142,7 +145,7 @@ class ORCIDConnector(BaseConnector):
                         status="succeeded",
                         records=[record],
                         request_count=1,
-                        retrieved_at=datetime.now(timezone.utc),
+                        retrieved_at=datetime.now(UTC),
                     )
                 elif resp.status_code == 404:
                     return ConnectorResult(

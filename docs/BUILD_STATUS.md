@@ -1,6 +1,6 @@
 # FRIS build status
 
-**Updated:** 24 November 2026  
+**Updated:** 26 November 2026
 **Repository:** `Prince-Singhalia/FRIS`  
 **Working branch:** `main`  
 **Starting code revision:** `291fbc5` (after removing the two handoff-document commits from the local branch)
@@ -18,18 +18,31 @@
 - Made repeated DOI and provider-ID-only publication persistence reuse existing canonical rows; repeated matching scores update the latest decision rather than multiplying identical rows.
 - Reworked Compose to remove the nonexistent frontend service and hidden `|| true` startup fallbacks. Database credentials and signing key must be configured; the Prefect work pool and manual deployment are registered before the API starts.
 - Organized reference files under `docs/specifications/` and `docs/archive/`; removed the two redundant Antigravity prompt files. The team handoff remains outside this repository in the parent `CICD PROJECT` directory.
+- Restored the backend Ruff gate by applying safe import/style fixes, formatting the backend, replacing string enums with `StrEnum`, narrowing broad validation assertions, and explicitly allowing FastAPI's dependency-injection defaults.
 
 ## Validation and environment
 
-No tests, compile checks, container startup, or live provider calls were run during this implementation session. The available Python is 3.9.6, below this project’s Python 3.11 minimum; Docker is installed but its daemon is not running. A normal sandboxed push initially failed because DNS resolution was unavailable; an authorized push then force-updated remote main with the implementation commit. Do not treat the changes as runtime-verified.
+Verified in the current continuation:
+
+- `backend/.venv/bin/python -m pytest -q`: **58 passed** (Python 3.11.17).
+- `backend/.venv/bin/python -m ruff check app tests`: passed.
+- `backend/.venv/bin/python -m compileall -q app tests`: passed.
+- `docker compose config -q` with disposable local credentials: passed.
+- `git diff --check`: passed.
+
+Not verified / blocked:
+
+- `mypy app` reports 33 existing type errors across auth, settings, API response construction, seeding, and discovery submission; mypy is not currently a CI gate.
+- Compose startup did not complete because an unrelated local container already occupies host port 5432. The partially started FRIS containers were stopped and removed; the existing container was left untouched.
+- PostgreSQL migrations, seed/login, real Prefect worker execution, API/database integration, and live provider calls remain unverified. Docker is available and running; Python 3.11.17 is available.
 
 ## Remaining work
 
 ### Aksh — backend/database/integration follow-up
 
-- Run the backend unit suite, Ruff, and type checks with Python 3.11+; fix failures in production code.
+- Resolve the 33 mypy findings and add a supported type-check gate after those errors are fixed.
 - Run `alembic upgrade head` and `alembic downgrade base` against a clean PostgreSQL database. Replace the metadata-driven initial revision with a frozen explicit baseline if the team wants immutable schema definitions before shipping.
-- Start Compose with a configured `.env`; verify migration, explicit seed, login, tenant isolation, manual Prefect submission, worker execution, flow failure state, and repeat-run persistence.
+- Start Compose on an available host port with a configured `.env`; verify migration, explicit seed, login, tenant isolation, manual Prefect submission, worker execution, flow failure state, and repeat-run persistence.
 - Add PostgreSQL API integration tests for cross-tenant denial, import behavior, idempotency, and Prefect submission failure/success.
 - Decide and implement the approved auto-discovery behavior for newly created/imported faculty; the current API provides an explicit manual discovery trigger.
 
@@ -48,4 +61,4 @@ No tests, compile checks, container startup, or live provider calls were run dur
 
 ## Key limitations
 
-There is no frontend, no end-to-end database/API coverage, no live-provider verification, and no configured staging deployment. The team should not describe FRIS as a complete or production-ready pilot until the integration gates in the implementation brief pass.
+There is no frontend, no end-to-end database/API coverage, no live-provider verification, and no configured staging deployment. The backend unit tests and Ruff checks pass, but database/worker behavior remains unverified. The team should not describe FRIS as a complete or production-ready pilot until the integration gates in the implementation brief pass.

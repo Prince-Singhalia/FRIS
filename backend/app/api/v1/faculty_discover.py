@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
@@ -67,14 +67,16 @@ async def trigger_discovery(
     db.add(job)
 
     # Audit
-    db.add(AuditEvent(
-        tenant_id=tid,
-        user_id=uuid.UUID(current_user.user_id),
-        action=AuditAction.discovery_triggered,
-        entity_type="faculty",
-        entity_id=faculty_id,
-        detail={"job_correlation_id": correlation_id, "trigger": "manual"},
-    ))
+    db.add(
+        AuditEvent(
+            tenant_id=tid,
+            user_id=uuid.UUID(current_user.user_id),
+            action=AuditAction.discovery_triggered,
+            entity_type="faculty",
+            entity_id=faculty_id,
+            detail={"job_correlation_id": correlation_id, "trigger": "manual"},
+        )
+    )
 
     await db.flush()
     job_id = str(job.id)
@@ -91,7 +93,7 @@ async def trigger_discovery(
         )
     except Exception as error:
         job.status = JobStatus.failed
-        job.completed_at = datetime.now(timezone.utc)
+        job.completed_at = datetime.now(UTC)
         job.error_detail = f"Prefect submission failed ({type(error).__name__})"
         await db.commit()
         raise HTTPException(

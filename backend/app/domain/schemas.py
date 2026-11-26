@@ -5,15 +5,14 @@ from __future__ import annotations
 import re
 import uuid
 from datetime import datetime
-from enum import Enum
 from urllib.parse import urlsplit
 
 from pydantic import BaseModel, Field, field_validator
 
-
 # ---------------------------------------------------------------------------
 # Common
 # ---------------------------------------------------------------------------
+
 
 class PaginatedResponse(BaseModel):
     items: list = Field(default_factory=list)
@@ -27,6 +26,7 @@ class PaginatedResponse(BaseModel):
 # Auth
 # ---------------------------------------------------------------------------
 
+
 class LoginRequest(BaseModel):
     username: str
     password: str
@@ -35,7 +35,7 @@ class LoginRequest(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str
     refresh_token: str
-    token_type: str = "bearer"
+    token_type: str = "bearer"  # noqa: S105
 
 
 class UserResponse(BaseModel):
@@ -54,6 +54,7 @@ class UserResponse(BaseModel):
 # Tenant
 # ---------------------------------------------------------------------------
 
+
 class TenantResponse(BaseModel):
     id: uuid.UUID
     name: str
@@ -66,6 +67,7 @@ class TenantResponse(BaseModel):
 # ---------------------------------------------------------------------------
 # Faculty
 # ---------------------------------------------------------------------------
+
 
 class FacultyCreate(BaseModel):
     full_name: str = Field(min_length=1, max_length=500)
@@ -178,6 +180,7 @@ class FacultyResponse(BaseModel):
 # CSV Import
 # ---------------------------------------------------------------------------
 
+
 class CSVRowPreview(BaseModel):
     row_number: int
     data: dict
@@ -208,6 +211,7 @@ class CSVImportResult(BaseModel):
 # ---------------------------------------------------------------------------
 # Discovery Jobs
 # ---------------------------------------------------------------------------
+
 
 class DiscoveryJobResponse(BaseModel):
     id: uuid.UUID
@@ -250,6 +254,7 @@ class ConnectorRunResponse(BaseModel):
 # Connector Status
 # ---------------------------------------------------------------------------
 
+
 class ConnectorStatusResponse(BaseModel):
     provider: str
     display_name: str
@@ -264,6 +269,7 @@ class ConnectorStatusResponse(BaseModel):
 # ---------------------------------------------------------------------------
 # Review Queue
 # ---------------------------------------------------------------------------
+
 
 class ReviewItemResponse(BaseModel):
     id: uuid.UUID
@@ -293,6 +299,7 @@ class ReviewDecisionRequest(BaseModel):
 # Dashboard
 # ---------------------------------------------------------------------------
 
+
 class DashboardOverview(BaseModel):
     tenant_id: uuid.UUID
     total_faculty: int = 0
@@ -306,6 +313,7 @@ class DashboardOverview(BaseModel):
 # ---------------------------------------------------------------------------
 # Publication
 # ---------------------------------------------------------------------------
+
 
 class PublicationSourceResponse(BaseModel):
     id: uuid.UUID
@@ -359,13 +367,14 @@ class PublicationResponse(BaseModel):
 # ORCID validation utility
 # ---------------------------------------------------------------------------
 
+
 def validate_orcid(value: str) -> str:
     """Validate ORCID format and checksum. Returns cleaned ORCID or raises ValueError."""
     cleaned = value.strip().upper()
     # Strip common prefixes
     for prefix in ["HTTPS://ORCID.ORG/", "HTTP://ORCID.ORG/", "ORCID.ORG/", "ORCID:"]:
         if cleaned.startswith(prefix):
-            cleaned = cleaned[len(prefix):]
+            cleaned = cleaned[len(prefix) :]
 
     # Must be XXXX-XXXX-XXXX-XXXX where X is 0-9 and last can be X
     cleaned = cleaned.replace(" ", "")

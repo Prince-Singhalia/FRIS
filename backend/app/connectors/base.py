@@ -5,7 +5,6 @@ from __future__ import annotations
 import abc
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
 
 
 @dataclass
@@ -118,11 +117,7 @@ class ConnectorRegistry:
     def get_enabled(self, enabled_providers: list[str] | None = None) -> dict[str, BaseConnector]:
         if enabled_providers is None:
             return dict(self._connectors)
-        return {
-            name: conn
-            for name, conn in self._connectors.items()
-            if name in enabled_providers
-        }
+        return {name: conn for name, conn in self._connectors.items() if name in enabled_providers}
 
 
 # Global registry instance

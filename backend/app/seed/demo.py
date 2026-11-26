@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import hash_password
+from app.core.logging import get_logger
 from app.core.settings import get_settings
 from app.db.models import (
     Faculty,
@@ -22,7 +23,6 @@ from app.db.models import (
     UserRole,
     VerificationStatus,
 )
-from app.core.logging import get_logger
 from app.domain.schemas import validate_orcid
 
 logger = get_logger(__name__)
@@ -40,7 +40,9 @@ async def seed_demo_data(db: AsyncSession) -> None:
         raise RuntimeError("Demo seeding is disabled; set FRIS_SEED_DEMO=true explicitly")
     if settings.app_env.lower() == "production":
         raise RuntimeError("Demo seeding is forbidden when APP_ENV=production")
-    if len(settings.admin_default_password) < 12 or settings.admin_default_password.startswith("CHANGE"):
+    if len(settings.admin_default_password) < 12 or settings.admin_default_password.startswith(
+        "CHANGE"
+    ):
         raise RuntimeError("Set a unique ADMIN_DEFAULT_PASSWORD of at least 12 characters")
 
     with PILOT_SEED_PATH.open(encoding="utf-8-sig", newline="") as seed_file:
@@ -110,41 +112,53 @@ async def seed_demo_data(db: AsyncSession) -> None:
         orcid = pilot_data.get("orcid", "").strip()
         if orcid:
             orcid = validate_orcid(orcid)
-            db.add(FacultyIdentifier(
-                faculty_id=pilot.id,
-                identifier_type=IdentifierType.orcid,
-                value=orcid,
-                is_verified=False,
-                verification_status=VerificationStatus.self_reported,
-                verification_source="pilot_seed_csv",
-            ))
+            db.add(
+                FacultyIdentifier(
+                    faculty_id=pilot.id,
+                    identifier_type=IdentifierType.orcid,
+                    value=orcid,
+                    is_verified=False,
+                    verification_status=VerificationStatus.self_reported,
+                    verification_source="pilot_seed_csv",
+                )
+            )
 
         # Name variants
-        for variant in [v.strip() for v in pilot_data.get("name_variants", "").split(";") if v.strip()]:
-            db.add(FacultyNameVariant(
-                faculty_id=pilot.id,
-                variant_name=variant,
-                source="pilot_seed",
-            ))
+        for variant in [
+            v.strip() for v in pilot_data.get("name_variants", "").split(";") if v.strip()
+        ]:
+            db.add(
+                FacultyNameVariant(
+                    faculty_id=pilot.id,
+                    variant_name=variant,
+                    source="pilot_seed",
+                )
+            )
 
         # Affiliation
         if pilot_data.get("institution", "").strip():
-            db.add(FacultyAffiliation(
-                faculty_id=pilot.id,
-                organization=pilot_data["institution"].strip(),
-                department=pilot_data.get("department", "").strip() or None,
-                is_current=True,
-                source="pilot_seed_csv",
-            ))
+            db.add(
+                FacultyAffiliation(
+                    faculty_id=pilot.id,
+                    organization=pilot_data["institution"].strip(),
+                    department=pilot_data.get("department", "").strip() or None,
+                    is_current=True,
+                    source="pilot_seed_csv",
+                )
+            )
 
         # Research interests
-        topics = [v.strip() for v in pilot_data.get("research_interests", "").split(";") if v.strip()]
+        topics = [
+            v.strip() for v in pilot_data.get("research_interests", "").split(";") if v.strip()
+        ]
         for topic in topics:
-            db.add(ResearchInterest(
-                faculty_id=pilot.id,
-                topic=topic,
-                source="pilot_seed",
-            ))
+            db.add(
+                ResearchInterest(
+                    faculty_id=pilot.id,
+                    topic=topic,
+                    source="pilot_seed",
+                )
+            )
 
         await db.flush()
         logger.info("seed_pilot_created", name=pilot.full_name)

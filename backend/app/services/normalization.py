@@ -24,7 +24,7 @@ def normalize_doi(doi: str | None) -> str | None:
         "DOI:",
     ]:
         if cleaned.lower().startswith(prefix.lower()):
-            cleaned = cleaned[len(prefix):]
+            cleaned = cleaned[len(prefix) :]
             break
     cleaned = cleaned.strip().lower()
     # Basic validity: must start with 10.

@@ -14,13 +14,13 @@ Auth: No key required; mailto recommended for polite pool
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import httpx
 
 from app.connectors.base import BaseConnector, ConnectorResult
-from app.core.settings import get_settings
 from app.core.logging import get_logger
+from app.core.settings import get_settings
 
 logger = get_logger(__name__)
 
@@ -30,7 +30,6 @@ MAX_ROWS = 50
 
 
 class CrossrefConnector(BaseConnector):
-
     @property
     def provider_name(self) -> str:
         return "crossref"
@@ -59,7 +58,11 @@ class CrossrefConnector(BaseConnector):
     def _get_headers(self) -> dict:
         """Headers including polite pool mailto."""
         settings = get_settings()
-        headers = {"User-Agent": f"FRIS/0.1 (mailto:{settings.crossref_mailto})" if settings.crossref_mailto else "FRIS/0.1"}
+        headers = {
+            "User-Agent": f"FRIS/0.1 (mailto:{settings.crossref_mailto})"
+            if settings.crossref_mailto
+            else "FRIS/0.1"
+        }
         return headers
 
     async def health_check(self) -> dict:
@@ -71,7 +74,10 @@ class CrossrefConnector(BaseConnector):
                     headers=self._get_headers(),
                 )
                 if resp.status_code == 200:
-                    return {"status": "healthy", "response_time_ms": resp.elapsed.total_seconds() * 1000}
+                    return {
+                        "status": "healthy",
+                        "response_time_ms": resp.elapsed.total_seconds() * 1000,
+                    }
                 return {"status": "unhealthy", "status_code": resp.status_code}
         except Exception as e:
             return {"status": "unhealthy", "error": str(e)}
@@ -119,9 +125,14 @@ class CrossrefConnector(BaseConnector):
                     for work in items:
                         records.append(self._normalize_work(work))
 
-                    total = data.get("message", {}).get("total-results", 0)
+                    total = data.get("message", {}).get(
+                        "total-results", 0
+                    )
                     if total > MAX_ROWS:
-                        warnings.append(f"Crossref returned {total} total results; only first {MAX_ROWS} fetched")
+                        warnings.append(
+                            f"Crossref returned {total} total results; "
+                            f"only first {MAX_ROWS} fetched"
+                        )
                 elif resp.status_code == 429:
                     return ConnectorResult(
                         status="rate_limited",
@@ -141,12 +152,16 @@ class CrossrefConnector(BaseConnector):
                 records=records,
                 request_count=request_count,
                 warnings=warnings,
-                retrieved_at=datetime.now(timezone.utc),
+                retrieved_at=datetime.now(UTC),
             )
         except httpx.TimeoutException as e:
-            return ConnectorResult(status="failed", request_count=request_count, errors=[f"Timeout: {e}"])
+            return ConnectorResult(
+                status="failed", request_count=request_count, errors=[f"Timeout: {e}"]
+            )
         except Exception as e:
-            return ConnectorResult(status="failed", request_count=request_count, errors=[f"Error: {e}"])
+            return ConnectorResult(
+                status="failed", request_count=request_count, errors=[f"Error: {e}"]
+            )
 
     async def lookup_work_by_doi(self, doi: str) -> ConnectorResult:
         """Look up work metadata by DOI."""
@@ -164,7 +179,7 @@ class CrossrefConnector(BaseConnector):
                         status="succeeded",
                         records=[self._normalize_work(work)],
                         request_count=1,
-                        retrieved_at=datetime.now(timezone.utc),
+                        retrieved_at=datetime.now(UTC),
                     )
                 elif resp.status_code == 404:
                     return ConnectorResult(status="succeeded", records=[], request_count=1)
@@ -210,16 +225,22 @@ class CrossrefConnector(BaseConnector):
             full_name = " ".join(name_parts) if name_parts else "Unknown"
 
             orcid_raw = author.get("ORCID", "")
-            orcid = orcid_raw.replace("http://orcid.org/", "").replace("https://orcid.org/", "").strip() or None
+            orcid = (
+                orcid_raw.replace("http://orcid.org/", "").replace("https://orcid.org/", "").strip()
+                or None
+            )
 
-            authors.append({
-                "position": i,
-                "name": full_name,
-                "orcid": orcid,
-                "affiliation": "; ".join(
-                    aff.get("name", "") for aff in author.get("affiliation", [])
-                ) or None,
-            })
+            authors.append(
+                {
+                    "position": i,
+                    "name": full_name,
+                    "orcid": orcid,
+                    "affiliation": "; ".join(
+                        aff.get("name", "") for aff in author.get("affiliation", [])
+                    )
+                    or None,
+                }
+            )
 
         # Venue
         containers = raw.get("container-title", [])

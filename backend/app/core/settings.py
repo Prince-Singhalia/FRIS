@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     postgres_port: int = 5432
     postgres_db: str = "fris"
     postgres_user: str = "fris"
-    postgres_password: str = "changeme"
+    postgres_password: str = "changeme"  # noqa: S105
 
     @property
     def database_url(self) -> str:
@@ -48,7 +48,7 @@ class Settings(BaseSettings):
         ).render_as_string(hide_password=False)
 
     # --- Auth / Security ---
-    secret_key: str = "CHANGE-ME-IN-PRODUCTION"
+    secret_key: str = "CHANGE-ME-IN-PRODUCTION"  # noqa: S105
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 30
     refresh_token_expire_days: int = 7
@@ -76,7 +76,7 @@ class Settings(BaseSettings):
     ieee_api_key: str = ""
 
     # --- Admin seed ---
-    admin_default_password: str = "CHANGE-ME"
+    admin_default_password: str = "CHANGE-ME"  # noqa: S105
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 

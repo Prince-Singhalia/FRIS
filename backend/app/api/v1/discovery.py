@@ -8,8 +8,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth import TokenData, get_current_user, require_roles
-from app.db.models import DiscoveryJob, Faculty
+from app.core.auth import TokenData, get_current_user
+from app.db.models import DiscoveryJob
 from app.db.session import get_db
 from app.domain.schemas import DiscoveryJobResponse, PaginatedResponse
 
@@ -32,7 +32,11 @@ async def list_jobs(
     count_q = select(func.count()).select_from(base_q.subquery())
     total = (await db.execute(count_q)).scalar() or 0
 
-    items_q = base_q.order_by(DiscoveryJob.created_at.desc()).offset((page - 1) * page_size).limit(page_size)
+    items_q = (
+        base_q.order_by(DiscoveryJob.created_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
     result = await db.execute(items_q)
     items = result.scalars().all()
 

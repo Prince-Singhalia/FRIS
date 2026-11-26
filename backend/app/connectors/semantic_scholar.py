@@ -14,13 +14,13 @@ Auth: Optional API key via x-api-key header
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import httpx
 
 from app.connectors.base import BaseConnector, ConnectorResult
-from app.core.settings import get_settings
 from app.core.logging import get_logger
+from app.core.settings import get_settings
 
 logger = get_logger(__name__)
 
@@ -30,7 +30,6 @@ MAX_LIMIT = 100
 
 
 class SemanticScholarConnector(BaseConnector):
-
     @property
     def provider_name(self) -> str:
         return "semantic_scholar"
@@ -121,12 +120,16 @@ class SemanticScholarConnector(BaseConnector):
                 records=records,
                 request_count=request_count,
                 warnings=warnings,
-                retrieved_at=datetime.now(timezone.utc),
+                retrieved_at=datetime.now(UTC),
             )
         except httpx.TimeoutException as e:
-            return ConnectorResult(status="failed", request_count=request_count, errors=[f"Timeout: {e}"])
+            return ConnectorResult(
+                status="failed", request_count=request_count, errors=[f"Timeout: {e}"]
+            )
         except Exception as e:
-            return ConnectorResult(status="failed", request_count=request_count, errors=[f"Error: {e}"])
+            return ConnectorResult(
+                status="failed", request_count=request_count, errors=[f"Error: {e}"]
+            )
 
     async def fetch_author_works(
         self,
@@ -139,7 +142,10 @@ class SemanticScholarConnector(BaseConnector):
 
         try:
             async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
-                fields = "paperId,externalIds,title,year,venue,publicationDate,citationCount,isOpenAccess,openAccessPdf,authors,abstract,url"
+                fields = (
+                    "paperId,externalIds,title,year,venue,publicationDate,"
+                    "citationCount,isOpenAccess,openAccessPdf,authors,abstract,url"
+                )
                 offset = int(cursor) if cursor else 0
                 params = {
                     "fields": fields,
@@ -169,7 +175,7 @@ class SemanticScholarConnector(BaseConnector):
                         records=records,
                         pagination=pagination,
                         request_count=request_count,
-                        retrieved_at=datetime.now(timezone.utc),
+                        retrieved_at=datetime.now(UTC),
                     )
                 elif resp.status_code == 429:
                     return ConnectorResult(
@@ -184,13 +190,19 @@ class SemanticScholarConnector(BaseConnector):
                         errors=[f"Papers fetch returned {resp.status_code}"],
                     )
         except Exception as e:
-            return ConnectorResult(status="failed", request_count=request_count, errors=[f"Error: {e}"])
+            return ConnectorResult(
+                status="failed", request_count=request_count, errors=[f"Error: {e}"]
+            )
 
     def _normalize_author(self, raw: dict) -> dict:
         external_ids = raw.get("externalIds") or {}
         orcid = external_ids.get("ORCID")
         affiliations = raw.get("affiliations", []) or []
-        aff_text = "; ".join(a.get("name", "") if isinstance(a, dict) else str(a) for a in affiliations) if affiliations else None
+        aff_text = (
+            "; ".join(a.get("name", "") if isinstance(a, dict) else str(a) for a in affiliations)
+            if affiliations
+            else None
+        )
 
         return {
             "provider": "semantic_scholar",
@@ -209,15 +221,15 @@ class SemanticScholarConnector(BaseConnector):
 
         authors = []
         for i, author in enumerate(raw.get("authors", [])):
-            authors.append({
-                "position": i,
-                "name": author.get("name", ""),
-                "provider_author_id": author.get("authorId", ""),
-            })
+            authors.append(
+                {
+                    "position": i,
+                    "name": author.get("name", ""),
+                    "provider_author_id": author.get("authorId", ""),
+                }
+            )
 
         payload_hash = hashlib.sha256(str(raw).encode()).hexdigest()[:16]
-
-        oa_pdf = raw.get("openAccessPdf") or {}
 
         return {
             "provider": "semantic_scholar",
@@ -227,7 +239,9 @@ class SemanticScholarConnector(BaseConnector):
             "publication_year": raw.get("year"),
             "publication_date": raw.get("publicationDate"),
             "venue": raw.get("venue"),
-            "publication_type": raw.get("publicationTypes", [None])[0] if raw.get("publicationTypes") else None,
+            "publication_type": raw.get("publicationTypes", [None])[0]
+            if raw.get("publicationTypes")
+            else None,
             "abstract": raw.get("abstract"),
             "landing_url": raw.get("url"),
             "is_open_access": raw.get("isOpenAccess"),

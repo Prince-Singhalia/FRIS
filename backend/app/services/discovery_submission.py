@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.core.settings import get_settings
-
 
 async def submit_discovery_run(
     *,

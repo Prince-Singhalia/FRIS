@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
@@ -33,9 +33,11 @@ async def list_reviews(
     count_q = select(func.count()).select_from(base_q.subquery())
     total = (await db.execute(count_q)).scalar() or 0
 
-    items_q = base_q.order_by(ReviewItem.priority.desc(), ReviewItem.created_at.asc()).offset(
-        (page - 1) * page_size
-    ).limit(page_size)
+    items_q = (
+        base_q.order_by(ReviewItem.priority.desc(), ReviewItem.created_at.asc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
     result = await db.execute(items_q)
     items = result.scalars().all()
 
@@ -72,22 +74,24 @@ async def submit_decision(
     review.decision = body.decision
     review.decision_rationale = body.rationale
     review.reviewer_id = uuid.UUID(current_user.user_id)
-    review.decided_at = datetime.now(timezone.utc)
+    review.decided_at = datetime.now(UTC)
     review.status = "decided" if body.decision != "defer" else "deferred"
 
     # Audit
-    db.add(AuditEvent(
-        tenant_id=uuid.UUID(current_user.tenant_id),
-        user_id=uuid.UUID(current_user.user_id),
-        action=AuditAction.review_decision,
-        entity_type=review.entity_type,
-        entity_id=review.entity_id,
-        detail={
-            "review_id": str(review.id),
-            "decision": body.decision,
-            "rationale": body.rationale,
-        },
-    ))
+    db.add(
+        AuditEvent(
+            tenant_id=uuid.UUID(current_user.tenant_id),
+            user_id=uuid.UUID(current_user.user_id),
+            action=AuditAction.review_decision,
+            entity_type=review.entity_type,
+            entity_id=review.entity_id,
+            detail={
+                "review_id": str(review.id),
+                "decision": body.decision,
+                "rationale": body.rationale,
+            },
+        )
+    )
 
     await db.flush()
     await db.refresh(review)

@@ -7,11 +7,11 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.core.settings import get_settings
-from app.core.errors import FRISError, fris_error_handler
-from app.core.logging import setup_logging, get_logger
-from app.db.session import dispose_engine
 from app.api.v1.router import api_router
+from app.core.errors import FRISError, fris_error_handler
+from app.core.logging import get_logger, setup_logging
+from app.core.settings import get_settings
+from app.db.session import dispose_engine
 
 logger = get_logger(__name__)
 
@@ -58,6 +58,7 @@ def create_app() -> FastAPI:
     @app.get("/health/ready", tags=["health"])
     async def health_ready():
         from app.db.session import get_engine
+
         try:
             engine = get_engine()
             async with engine.connect() as conn:

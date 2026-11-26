@@ -44,7 +44,9 @@ def main() -> None:
     if settings.fris_seed_demo:
         if settings.app_env.lower() == "production":
             raise RuntimeError("FRIS_SEED_DEMO cannot be enabled when APP_ENV=production")
-        if len(settings.admin_default_password) < 12 or settings.admin_default_password.startswith("CHANGE"):
+        if len(settings.admin_default_password) < 12 or settings.admin_default_password.startswith(
+            "CHANGE"
+        ):
             raise RuntimeError(
                 "Set ADMIN_DEFAULT_PASSWORD to a unique password of at least 12 characters "
                 "before enabling FRIS_SEED_DEMO"
@@ -54,9 +56,9 @@ def main() -> None:
     if settings.fris_seed_demo:
         asyncio.run(_seed_demo_data())
 
-    host = os.getenv("BACKEND_HOST", "0.0.0.0")
+    host = os.getenv("BACKEND_HOST", "0.0.0.0")  # noqa: S104
     port = os.getenv("BACKEND_PORT", "8000")
-    os.execv(
+    os.execv(  # noqa: S606
         sys.executable,
         [sys.executable, "-m", "uvicorn", "app.main:app", "--host", host, "--port", port],
     )

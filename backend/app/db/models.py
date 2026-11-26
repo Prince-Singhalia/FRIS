@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+# ---------------------------------------------------------------------------
+# Enums
+# ---------------------------------------------------------------------------
 import uuid
 from datetime import datetime
+from enum import StrEnum
 
 from sqlalchemy import (
     Boolean,
     DateTime,
-    Enum as SAEnum,
     Float,
     ForeignKey,
     Index,
@@ -16,27 +19,24 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
-    func,
+)
+from sqlalchemy import (
+    Enum as SAEnum,
 )
 from sqlalchemy.dialects.postgresql import JSON, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 
-# ---------------------------------------------------------------------------
-# Enums
-# ---------------------------------------------------------------------------
-import enum
 
-
-class UserRole(str, enum.Enum):
+class UserRole(StrEnum):
     admin = "admin"
     research_officer = "research_officer"
     reviewer = "reviewer"
     viewer = "viewer"
 
 
-class IdentifierType(str, enum.Enum):
+class IdentifierType(StrEnum):
     orcid = "orcid"
     openalex = "openalex"
     semantic_scholar = "semantic_scholar"
@@ -46,14 +46,14 @@ class IdentifierType(str, enum.Enum):
     crossref = "crossref"
 
 
-class VerificationStatus(str, enum.Enum):
+class VerificationStatus(StrEnum):
     unverified = "unverified"
     self_reported = "self_reported"
     system_verified = "system_verified"
     admin_verified = "admin_verified"
 
 
-class JobStatus(str, enum.Enum):
+class JobStatus(StrEnum):
     pending = "pending"
     running = "running"
     succeeded = "succeeded"
@@ -62,7 +62,7 @@ class JobStatus(str, enum.Enum):
     cancelled = "cancelled"
 
 
-class ConnectorRunStatus(str, enum.Enum):
+class ConnectorRunStatus(StrEnum):
     pending = "pending"
     running = "running"
     succeeded = "succeeded"
@@ -73,7 +73,7 @@ class ConnectorRunStatus(str, enum.Enum):
     rate_limited = "rate_limited"
 
 
-class MatchStatus(str, enum.Enum):
+class MatchStatus(StrEnum):
     verified = "verified"
     probable = "probable"
     review_required = "review_required"
@@ -81,14 +81,14 @@ class MatchStatus(str, enum.Enum):
     pending = "pending"
 
 
-class ParseStatus(str, enum.Enum):
+class ParseStatus(StrEnum):
     valid = "valid"
     invalid = "invalid"
     quarantined = "quarantined"
     partial = "partial"
 
 
-class ReviewAction(str, enum.Enum):
+class ReviewAction(StrEnum):
     accept = "accept"
     reject = "reject"
     defer = "defer"
@@ -97,7 +97,7 @@ class ReviewAction(str, enum.Enum):
     request_rediscovery = "request_rediscovery"
 
 
-class AuditAction(str, enum.Enum):
+class AuditAction(StrEnum):
     login = "login"
     faculty_created = "faculty_created"
     faculty_updated = "faculty_updated"
@@ -111,7 +111,7 @@ class AuditAction(str, enum.Enum):
     connector_configured = "connector_configured"
 
 
-class PublicationRelationType(str, enum.Enum):
+class PublicationRelationType(StrEnum):
     preprint_final = "preprint_final"
     version = "version"
     correction = "correction"
@@ -148,7 +148,9 @@ class User(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     username: Mapped[str] = mapped_column(String(150), nullable=False)
     hashed_password: Mapped[str] = mapped_column(String(512), nullable=False)
     full_name: Mapped[str] = mapped_column(String(255), nullable=False)
-    role: Mapped[UserRole] = mapped_column(SAEnum(UserRole), nullable=False, default=UserRole.viewer)
+    role: Mapped[UserRole] = mapped_column(
+        SAEnum(UserRole), nullable=False, default=UserRole.viewer
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
     __table_args__ = (
@@ -175,9 +177,7 @@ class Faculty(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     demo_label: Mapped[str | None] = mapped_column(String(500), nullable=True)
     import_batch_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
 
-    __table_args__ = (
-        Index("ix_faculty_tenant_name", "tenant_id", "full_name"),
-    )
+    __table_args__ = (Index("ix_faculty_tenant_name", "tenant_id", "full_name"),)
 
     tenant: Mapped[Tenant] = relationship(back_populates="faculty_members")
     identifiers: Mapped[list[FacultyIdentifier]] = relationship(
@@ -276,7 +276,9 @@ class ConnectorConfig(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     capabilities: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     config: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # never store secrets here
     health_status: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    last_health_check: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_health_check: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     __table_args__ = (
         UniqueConstraint("tenant_id", "provider", name="uq_connector_tenant_provider"),
@@ -295,7 +297,9 @@ class DiscoveryJob(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     status: Mapped[JobStatus] = mapped_column(
         SAEnum(JobStatus), default=JobStatus.pending, nullable=False, index=True
     )
-    trigger_type: Mapped[str] = mapped_column(String(50), nullable=False)  # manual, scheduled, faculty_created, retry
+    trigger_type: Mapped[str] = mapped_column(
+        String(50), nullable=False
+    )  # manual, scheduled, faculty_created, retry
     triggered_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
     correlation_id: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
     idempotency_key: Mapped[str | None] = mapped_column(String(255), nullable=True, unique=True)
@@ -321,7 +325,10 @@ class ConnectorRun(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "connector_runs"
 
     job_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("discovery_jobs.id", ondelete="CASCADE"), nullable=False, index=True
+        UUID(as_uuid=True),
+        ForeignKey("discovery_jobs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     provider: Mapped[str] = mapped_column(String(100), nullable=False)
     status: Mapped[ConnectorRunStatus] = mapped_column(
@@ -384,7 +391,10 @@ class SourceRecord(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 
     __table_args__ = (
         UniqueConstraint(
-            "tenant_id", "provider", "provider_record_id", name="uq_source_record_tenant_provider_id"
+            "tenant_id",
+            "provider",
+            "provider_record_id",
+            name="uq_source_record_tenant_provider_id",
         ),
         Index("ix_source_record_tenant_provider", "tenant_id", "provider"),
     )
@@ -412,7 +422,9 @@ class AuthorCandidate(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     )
 
     __table_args__ = (
-        UniqueConstraint("faculty_id", "provider", "provider_author_id", name="uq_author_candidate"),
+        UniqueConstraint(
+            "faculty_id", "provider", "provider_author_id", name="uq_author_candidate"
+        ),
         Index("ix_author_candidate_faculty", "faculty_id"),
     )
 
@@ -425,7 +437,10 @@ class MatchDecision(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "match_decisions"
 
     author_candidate_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("author_candidates.id", ondelete="CASCADE"), nullable=False, index=True
+        UUID(as_uuid=True),
+        ForeignKey("author_candidates.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     faculty_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("faculty.id"), nullable=False, index=True
@@ -490,7 +505,10 @@ class PublicationSource(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "publication_sources"
 
     publication_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("publications.id", ondelete="CASCADE"), nullable=False, index=True
+        UUID(as_uuid=True),
+        ForeignKey("publications.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     source_record_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("source_records.id"), nullable=True
@@ -520,7 +538,10 @@ class FacultyPublicationMatch(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         UUID(as_uuid=True), ForeignKey("faculty.id"), nullable=False, index=True
     )
     publication_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("publications.id", ondelete="CASCADE"), nullable=False, index=True
+        UUID(as_uuid=True),
+        ForeignKey("publications.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     tenant_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True
@@ -540,7 +561,10 @@ class Authorship(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "authorships"
 
     publication_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("publications.id", ondelete="CASCADE"), nullable=False, index=True
+        UUID(as_uuid=True),
+        ForeignKey("publications.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     author_position: Mapped[int | None] = mapped_column(Integer, nullable=True)
     author_name: Mapped[str] = mapped_column(String(500), nullable=False)
@@ -568,7 +592,9 @@ class PublicationRelation(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     evidence: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     __table_args__ = (
-        UniqueConstraint("publication_a_id", "publication_b_id", "relation_type", name="uq_pub_relation"),
+        UniqueConstraint(
+            "publication_a_id", "publication_b_id", "relation_type", name="uq_pub_relation"
+        ),
     )
 
 

@@ -1,11 +1,12 @@
 """Unit tests for CSV validation and tenant scoping."""
 
 import pytest
-from app.domain.schemas import validate_orcid, FacultyCreate
+from pydantic import ValidationError
+
+from app.domain.schemas import FacultyCreate
 
 
 class TestCSVValidation:
-
     def test_faculty_create_valid(self):
         fc = FacultyCreate(
             full_name="Test Researcher",
@@ -26,11 +27,11 @@ class TestCSVValidation:
         assert fc.orcid is None
 
     def test_faculty_create_invalid_orcid(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             FacultyCreate(full_name="Test", orcid="invalid-orcid")
 
     def test_faculty_create_name_required(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             FacultyCreate(full_name="")
 
     def test_faculty_create_name_variants_list(self):

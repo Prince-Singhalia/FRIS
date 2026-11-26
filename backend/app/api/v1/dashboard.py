@@ -72,19 +72,22 @@ async def dashboard_overview(
 
     # Connector statuses from connectors module
     from app.api.v1.connectors import DEFAULT_CONNECTORS
+
     settings = get_settings()
     conn_statuses = []
     for conn in DEFAULT_CONNECTORS:
         is_configured = conn["credential_check"](settings)
-        conn_statuses.append(ConnectorStatusResponse(
-            provider=conn["provider"],
-            display_name=conn["display_name"],
-            is_enabled=conn["provider"] != "ieee",
-            is_configured=is_configured,
-            health_status="not_checked" if is_configured else "not_configured",
-            capabilities=conn["capabilities"],
-            terms_url=conn["terms_url"],
-        ))
+        conn_statuses.append(
+            ConnectorStatusResponse(
+                provider=conn["provider"],
+                display_name=conn["display_name"],
+                is_enabled=conn["provider"] != "ieee",
+                is_configured=is_configured,
+                health_status="not_checked" if is_configured else "not_configured",
+                capabilities=conn["capabilities"],
+                terms_url=conn["terms_url"],
+            )
+        )
 
     return DashboardOverview(
         tenant_id=tid,
@@ -130,6 +133,7 @@ async def faculty_dashboard(
     ).scalar_one_or_none()
 
     from app.domain.schemas import FacultyResponse
+
     return {
         "faculty": FacultyResponse.model_validate(faculty),
         "publication_count": pub_count,

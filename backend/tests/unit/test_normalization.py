@@ -1,12 +1,9 @@
 """Unit tests for DOI normalization and title normalization — tests production code."""
 
-import pytest
-
 from app.services.normalization import normalize_doi, normalize_title
 
 
 class TestDOINormalization:
-
     def test_basic_doi(self):
         assert normalize_doi("10.1234/test.5678") == "10.1234/test.5678"
 
@@ -38,14 +35,18 @@ class TestDOINormalization:
         assert normalize_doi("") is None
 
     def test_real_doi(self):
-        assert normalize_doi("https://doi.org/10.1109/CVPR.2009.5206848") == "10.1109/cvpr.2009.5206848"
+        assert (
+            normalize_doi("https://doi.org/10.1109/CVPR.2009.5206848")
+            == "10.1109/cvpr.2009.5206848"
+        )
 
 
 class TestTitleNormalization:
-
     def test_basic_title(self):
-        assert normalize_title("ImageNet: A Large-Scale Hierarchical Image Database") == \
-            "imagenet a large-scale hierarchical image database"
+        assert (
+            normalize_title("ImageNet: A Large-Scale Hierarchical Image Database")
+            == "imagenet a large-scale hierarchical image database"
+        )
 
     def test_unicode_normalization(self):
         assert normalize_title("café") == normalize_title("café")

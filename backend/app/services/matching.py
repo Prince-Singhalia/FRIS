@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from app.services.normalization import compute_name_similarity
 
-
 SCORE_VERSION = "1.0"
 
 
@@ -43,71 +42,90 @@ def compute_confidence_score(
     # Verified ORCID or linked identifier: max 40
     if orcid_match:
         points += 40
-        positive_evidence.append({
-            "signal": "verified_orcid",
-            "points": 40,
-            "detail": "ORCID matched faculty profile",
-        })
+        positive_evidence.append(
+            {
+                "signal": "verified_orcid",
+                "points": 40,
+                "detail": "ORCID matched faculty profile",
+            }
+        )
     elif verified_identifier:
         points += 40
-        positive_evidence.append({
-            "signal": "verified_identifier",
-            "points": 40,
-            "detail": "Verified provider author ID matched",
-        })
+        positive_evidence.append(
+            {
+                "signal": "verified_identifier",
+                "points": 40,
+                "detail": "Verified provider author ID matched",
+            }
+        )
 
     # Institution match: max 20
     if institution_match:
         points += 20
-        positive_evidence.append({
-            "signal": "institution_match",
-            "points": 20,
-            "detail": "Institution/affiliation matched",
-        })
+        positive_evidence.append(
+            {
+                "signal": "institution_match",
+                "points": 20,
+                "detail": "Institution/affiliation matched",
+            }
+        )
 
     # Name similarity: max 15
     name_points = round(name_similarity * 15)
     if name_points > 0:
         points += name_points
-        positive_evidence.append({
-            "signal": "name_similarity",
-            "points": name_points,
-            "detail": f"Name similarity score: {name_similarity:.2f}",
-        })
+        positive_evidence.append(
+            {
+                "signal": "name_similarity",
+                "points": name_points,
+                "detail": f"Name similarity score: {name_similarity:.2f}",
+            }
+        )
 
     # Co-author continuity: max 10
     if coauthor_continuity:
         points += 10
-        positive_evidence.append({
-            "signal": "coauthor_continuity",
-            "points": 10,
-            "detail": "Co-author overlap detected across publications",
-        })
+        positive_evidence.append(
+            {
+                "signal": "coauthor_continuity",
+                "points": 10,
+                "detail": "Co-author overlap detected across publications",
+            }
+        )
 
     # Topic continuity: max 5
     if topic_continuity:
         points += 5
-        positive_evidence.append({
-            "signal": "topic_continuity",
-            "points": 5,
-            "detail": "Research topic overlap with faculty profile",
-        })
+        positive_evidence.append(
+            {
+                "signal": "topic_continuity",
+                "points": 5,
+                "detail": "Research topic overlap with faculty profile",
+            }
+        )
 
     # Chronology consistency: max 10
     if chronology_consistent:
         points += 10
-        positive_evidence.append({
-            "signal": "chronology_consistent",
-            "points": 10,
-            "detail": "Publication dates consistent with affiliation timeline",
-        })
+        positive_evidence.append(
+            {
+                "signal": "chronology_consistent",
+                "points": 10,
+                "detail": "Publication dates consistent with affiliation timeline",
+            }
+        )
 
     # Hard contradiction
     if has_contradiction:
-        negative_evidence.append({
-            "signal": "contradiction",
-            "detail": "Hard contradiction detected (e.g., conflicting ORCID, incompatible identifier, or strong affiliation/time contradiction)",
-        })
+        negative_evidence.append(
+            {
+                "signal": "contradiction",
+                "detail": (
+                    "Hard contradiction detected (e.g., conflicting ORCID, incompatible "
+                    "identifier, or strong affiliation/time contradiction)"
+                ),
+            }
+        )
 
     # Cap at 100
     score = min(points, 100)
@@ -116,7 +134,9 @@ def compute_confidence_score(
     if has_contradiction:
         band = "review_required"
         explanation_parts = [f"Score {score}/100"]
-        explanation_parts.append("Hard contradiction detected — forced to review regardless of score")
+        explanation_parts.append(
+            "Hard contradiction detected — forced to review regardless of score"
+        )
         for ev in positive_evidence:
             explanation_parts.append(f"{ev['signal']}: +{ev['points']}")
         for ev in negative_evidence:

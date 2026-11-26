@@ -90,7 +90,9 @@ async def refresh_token(body: RefreshRequest, db: AsyncSession = Depends(get_db)
         user_uuid = uuid.UUID(user_id)
         tenant_uuid = uuid.UUID(tenant_id)
     except (TypeError, ValueError) as error:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token claims") from error
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token claims"
+        ) from error
 
     # Verify user still exists and is active
     result = await db.execute(
@@ -98,7 +100,9 @@ async def refresh_token(body: RefreshRequest, db: AsyncSession = Depends(get_db)
     )
     user = result.scalar_one_or_none()
     if not user or not user.is_active:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found or disabled")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found or disabled"
+        )
 
     access = create_access_token(str(user.id), str(user.tenant_id), user.role.value)
     new_refresh = create_refresh_token(str(user.id), str(user.tenant_id), user.role.value)

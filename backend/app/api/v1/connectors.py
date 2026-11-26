@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import TokenData, get_current_user
 from app.core.settings import get_settings
-from app.db.models import ConnectorConfig
 from app.db.session import get_db
 from app.domain.schemas import ConnectorStatusResponse
 
@@ -66,14 +64,16 @@ async def get_connector_status(
         is_configured = conn["credential_check"](settings)
         is_enabled = conn["provider"] != "ieee"  # IEEE disabled by default
 
-        statuses.append(ConnectorStatusResponse(
-            provider=conn["provider"],
-            display_name=conn["display_name"],
-            is_enabled=is_enabled,
-            is_configured=is_configured,
-            health_status="not_checked" if is_configured else "not_configured",
-            capabilities=conn["capabilities"],
-            terms_url=conn["terms_url"],
-        ))
+        statuses.append(
+            ConnectorStatusResponse(
+                provider=conn["provider"],
+                display_name=conn["display_name"],
+                is_enabled=is_enabled,
+                is_configured=is_configured,
+                health_status="not_checked" if is_configured else "not_configured",
+                capabilities=conn["capabilities"],
+                terms_url=conn["terms_url"],
+            )
+        )
 
     return statuses

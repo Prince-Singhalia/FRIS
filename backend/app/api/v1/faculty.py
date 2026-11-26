@@ -14,6 +14,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import TokenData, get_current_user, require_roles
 from app.db.models import (
+    AuditAction,
+    AuditEvent,
     Faculty,
     FacultyAffiliation,
     FacultyIdentifier,
@@ -22,8 +24,6 @@ from app.db.models import (
     ResearchInterest,
     Tenant,
     VerificationStatus,
-    AuditAction,
-    AuditEvent,
 )
 from app.db.session import get_db
 from app.domain.schemas import (
@@ -130,7 +130,9 @@ async def create_faculty(
     if tenant is None:
         raise HTTPException(status_code=401, detail="Tenant not found")
     if body.is_demo and not tenant.is_demo:
-        raise HTTPException(status_code=422, detail="Demo records can only be created in a demo tenant")
+        raise HTTPException(
+            status_code=422, detail="Demo records can only be created in a demo tenant"
+        )
     is_demo = tenant.is_demo or body.is_demo
 
     # Check for duplicate name in tenant
@@ -141,7 +143,9 @@ async def create_faculty(
         )
     )
     if existing.scalar_one_or_none():
-        raise HTTPException(status_code=409, detail=f"Faculty '{body.full_name}' already exists in tenant")
+        raise HTTPException(
+            status_code=409, detail=f"Faculty '{body.full_name}' already exists in tenant"
+        )
 
     faculty = Faculty(
         tenant_id=tenant_id,
@@ -177,13 +181,15 @@ async def create_faculty(
 
     # Add reported institution as affiliation
     if body.reported_institution:
-        db.add(FacultyAffiliation(
-            faculty_id=faculty.id,
-            organization=body.reported_institution,
-            department=body.department,
-            is_current=True,
-            source="user_input",
-        ))
+        db.add(
+            FacultyAffiliation(
+                faculty_id=faculty.id,
+                organization=body.reported_institution,
+                department=body.department,
+                is_current=True,
+                source="user_input",
+            )
+        )
 
     # Add research interests
     if body.research_interests_text:
@@ -193,14 +199,16 @@ async def create_faculty(
                 db.add(ResearchInterest(faculty_id=faculty.id, topic=t, source="user_input"))
 
     # Audit
-    db.add(AuditEvent(
-        tenant_id=tenant_id,
-        user_id=uuid.UUID(current_user.user_id),
-        action=AuditAction.faculty_created,
-        entity_type="faculty",
-        entity_id=faculty.id,
-        detail={"full_name": body.full_name, "is_demo": is_demo},
-    ))
+    db.add(
+        AuditEvent(
+            tenant_id=tenant_id,
+            user_id=uuid.UUID(current_user.user_id),
+            action=AuditAction.faculty_created,
+            entity_type="faculty",
+            entity_id=faculty.id,
+            detail={"full_name": body.full_name, "is_demo": is_demo},
+        )
+    )
 
     await db.flush()
     # Reload with relationships
@@ -278,14 +286,16 @@ async def update_faculty(
     for field, value in update_data.items():
         setattr(faculty, field, value)
 
-    db.add(AuditEvent(
-        tenant_id=uuid.UUID(current_user.tenant_id),
-        user_id=uuid.UUID(current_user.user_id),
-        action=AuditAction.faculty_updated,
-        entity_type="faculty",
-        entity_id=faculty.id,
-        detail={"updated_fields": list(update_data.keys())},
-    ))
+    db.add(
+        AuditEvent(
+            tenant_id=uuid.UUID(current_user.tenant_id),
+            user_id=uuid.UUID(current_user.user_id),
+            action=AuditAction.faculty_updated,
+            entity_type="faculty",
+            entity_id=faculty.id,
+            detail={"updated_fields": list(update_data.keys())},
+        )
+    )
 
     await db.flush()
     await db.refresh(faculty, attribute_names=["identifiers", "name_variants", "affiliations"])
@@ -308,7 +318,10 @@ async def import_preview(
     if "full_name" not in headers_mapped.values():
         raise HTTPException(
             status_code=422,
-            detail=f"CSV must contain a name column. Found: {headers_found}. Expected one of: faculty_name, full_name, name",
+            detail=(
+                f"CSV must contain a name column. Found: {headers_found}. "
+                "Expected one of: faculty_name, full_name, name"
+            ),
         )
 
     rows: list[CSVRowPreview] = []
@@ -338,14 +351,16 @@ async def import_preview(
             if dup_id or duplicate_in_upload:
                 errors.append("duplicate faculty name in this tenant or upload")
 
-        rows.append(CSVRowPreview(
-            row_number=i,
-            data=data,
-            is_valid=len(errors) == 0,
-            errors=errors,
-            duplicate_of=dup_id,
-            duplicate_in_upload=duplicate_in_upload,
-        ))
+        rows.append(
+            CSVRowPreview(
+                row_number=i,
+                data=data,
+                is_valid=len(errors) == 0,
+                errors=errors,
+                duplicate_of=dup_id,
+                duplicate_in_upload=duplicate_in_upload,
+            )
+        )
 
     return CSVImportPreview(
         total_rows=len(rows),
@@ -371,7 +386,9 @@ async def import_commit(
         if mapped:
             headers_mapped[h] = mapped
     if "full_name" not in headers_mapped.values():
-        raise HTTPException(status_code=422, detail="CSV must contain a faculty_name, full_name, or name column")
+        raise HTTPException(
+            status_code=422, detail="CSV must contain a faculty_name, full_name, or name column"
+        )
 
     batch_id = uuid.uuid4()
     tenant_id = uuid.UUID(current_user.tenant_id)
@@ -395,7 +412,9 @@ async def import_commit(
         normalized_name = data["full_name"].casefold()
         if normalized_name in seen_names:
             skipped += 1
-            errors_list.append({"row": i, "error": "duplicate faculty name in this upload; row skipped"})
+            errors_list.append(
+                {"row": i, "error": "duplicate faculty name in this upload; row skipped"}
+            )
             continue
         seen_names.add(normalized_name)
         existing = await db.execute(
@@ -406,7 +425,9 @@ async def import_commit(
         )
         if existing.scalar_one_or_none():
             skipped += 1
-            errors_list.append({"row": i, "error": "faculty already exists in this tenant; row skipped"})
+            errors_list.append(
+                {"row": i, "error": "faculty already exists in this tenant; row skipped"}
+            )
             continue
 
         faculty = Faculty(
@@ -425,34 +446,40 @@ async def import_commit(
         await db.flush()
 
         if data.get("orcid"):
-            db.add(FacultyIdentifier(
-                faculty_id=faculty.id,
-                identifier_type=IdentifierType.orcid,
-                value=data["orcid"],
-                is_verified=False,
-                verification_status=VerificationStatus.self_reported,
-                verification_source="csv_import",
-            ))
+            db.add(
+                FacultyIdentifier(
+                    faculty_id=faculty.id,
+                    identifier_type=IdentifierType.orcid,
+                    value=data["orcid"],
+                    is_verified=False,
+                    verification_status=VerificationStatus.self_reported,
+                    verification_source="csv_import",
+                )
+            )
 
         for v in _split_semicolon_list(data.get("name_variants")):
             db.add(FacultyNameVariant(faculty_id=faculty.id, variant_name=v, source="csv_import"))
 
         if data.get("reported_institution"):
-            db.add(FacultyAffiliation(
-                faculty_id=faculty.id,
-                organization=data["reported_institution"],
-                department=data.get("department"),
-                is_current=True,
-                source="csv_import",
-            ))
+            db.add(
+                FacultyAffiliation(
+                    faculty_id=faculty.id,
+                    organization=data["reported_institution"],
+                    department=data.get("department"),
+                    is_current=True,
+                    source="csv_import",
+                )
+            )
 
         for previous_affiliation in _split_semicolon_list(data.get("previous_affiliations")):
-            db.add(FacultyAffiliation(
-                faculty_id=faculty.id,
-                organization=previous_affiliation,
-                is_current=False,
-                source="csv_import_previous_affiliation",
-            ))
+            db.add(
+                FacultyAffiliation(
+                    faculty_id=faculty.id,
+                    organization=previous_affiliation,
+                    is_current=False,
+                    source="csv_import_previous_affiliation",
+                )
+            )
 
         for t in _split_semicolon_list(data.get("research_interests")):
             db.add(ResearchInterest(faculty_id=faculty.id, topic=t, source="csv_import"))
@@ -460,13 +487,20 @@ async def import_commit(
         imported += 1
 
     # Audit
-    db.add(AuditEvent(
-        tenant_id=tenant_id,
-        user_id=uuid.UUID(current_user.user_id),
-        action=AuditAction.faculty_imported,
-        entity_type="faculty",
-        detail={"batch_id": str(batch_id), "imported": imported, "skipped": skipped, "errors": len(errors_list)},
-    ))
+    db.add(
+        AuditEvent(
+            tenant_id=tenant_id,
+            user_id=uuid.UUID(current_user.user_id),
+            action=AuditAction.faculty_imported,
+            entity_type="faculty",
+            detail={
+                "batch_id": str(batch_id),
+                "imported": imported,
+                "skipped": skipped,
+                "errors": len(errors_list),
+            },
+        )
+    )
 
     return CSVImportResult(
         batch_id=batch_id,
@@ -506,11 +540,16 @@ async def get_faculty_publications(
     count_q = select(func.count()).select_from(base_q.subquery())
     total = (await db.execute(count_q)).scalar() or 0
 
-    items_q = base_q.order_by(Publication.publication_year.desc().nullslast()).offset((page - 1) * page_size).limit(page_size)
+    items_q = (
+        base_q.order_by(Publication.publication_year.desc().nullslast())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
     result = await db.execute(items_q)
     items = result.scalars().all()
 
     from app.domain.schemas import PublicationResponse
+
     return PaginatedResponse(
         items=[PublicationResponse.model_validate(p) for p in items],
         total=total,

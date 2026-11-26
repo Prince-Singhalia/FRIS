@@ -1,11 +1,9 @@
 """Unit tests for confidence scoring — tests production code in app.services.matching."""
 
-import pytest
 from app.services.matching import compute_confidence_score
 
 
 class TestConfidenceScoring:
-
     def test_verified_orcid_full_match(self):
         result = compute_confidence_score(
             orcid_match=True,
