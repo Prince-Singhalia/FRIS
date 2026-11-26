@@ -28,6 +28,7 @@ logger = get_logger(__name__)
 OPENALEX_API_BASE = "https://api.openalex.org"
 DEFAULT_TIMEOUT = httpx.Timeout(connect=10.0, read=30.0, write=10.0, pool=10.0)
 MAX_PER_PAGE = 50
+MAX_BASIC_RESULTS = 10_000
 
 
 class OpenAlexConnector(BaseConnector):
@@ -98,6 +99,7 @@ class OpenAlexConnector(BaseConnector):
         warnings = []
         errors: list[str] = []
         request_count = 0
+        rate_limited = False
 
         try:
             async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
@@ -112,7 +114,10 @@ class OpenAlexConnector(BaseConnector):
                     if resp.status_code == 200:
                         data = resp.json()
                         for author in data.get("results", []):
-                            records.append(self._normalize_author(author))
+                            normalized = self._normalize_author(author)
+                            provider_orcid = normalized.get("provider_orcid")
+                            if provider_orcid and provider_orcid.upper() == orcid.upper():
+                                records.append(normalized)
                     elif resp.status_code == 429:
                         return ConnectorResult(
                             status="rate_limited",
@@ -121,10 +126,14 @@ class OpenAlexConnector(BaseConnector):
                             errors=["Rate limited by OpenAlex"],
                         )
                     else:
-                        warnings.append(f"ORCID search returned {resp.status_code}")
+                        error = f"ORCID search returned {resp.status_code}"
+                        warnings.append(error)
+                        errors.append(error)
 
                 # Strategy 2: Name search
-                if not records:
+                # ORCID is an exact identity lookup. Never broaden a failed or
+                # empty identifier lookup into a name search for an unrelated person.
+                if not orcid and not records:
                     names_to_search = [faculty_name]
                     if name_variants:
                         names_to_search.extend(name_variants[:3])  # Limit variant searches
@@ -150,12 +159,22 @@ class OpenAlexConnector(BaseConnector):
                                     records.append(self._normalize_author(author))
                         elif resp.status_code == 429:
                             warnings.append(f"Rate limited during name search for '{name}'")
+                            rate_limited = True
                             break
                         else:
-                            warnings.append(f"Name search for '{name}' returned {resp.status_code}")
+                            error = f"Name search for '{name}' returned {resp.status_code}"
+                            warnings.append(error)
+                            errors.append(error)
 
+            status = (
+                "failed"
+                if errors and not records
+                else "rate_limited"
+                if rate_limited and not records
+                else "succeeded"
+            )
             return ConnectorResult(
-                status="succeeded" if records else "succeeded",
+                status=status,
                 records=records,
                 request_count=request_count,
                 warnings=warnings,
@@ -181,12 +200,18 @@ class OpenAlexConnector(BaseConnector):
         provider_author_id: str,
         cursor: str | None = None,
         per_page: int = MAX_PER_PAGE,
+        page: int = 1,
     ) -> ConnectorResult:
-        """Fetch works for an OpenAlex author using cursor pagination."""
+        """Fetch author works using numbered paging for the public demo.
+
+        Cursor remains available for existing workflow callers. Numbered paging
+        does not require an OpenAlex API key, but is limited to 10,000 results.
+        """
         records = []
         errors = []
         request_count = 0
         next_cursor = None
+        count = 0
 
         try:
             async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
@@ -198,9 +223,15 @@ class OpenAlexConnector(BaseConnector):
                     **base_params,
                     "filter": f"authorships.author.id:{short_id}",
                     "per_page": str(min(per_page, MAX_PER_PAGE)),
-                    "cursor": cursor or "*",
                     "sort": "publication_date:desc",
                 }
+                if cursor:
+                    params["cursor"] = cursor
+                else:
+                    safe_page_size = min(max(per_page, 1), MAX_PER_PAGE)
+                    safe_page = min(max(page, 1), MAX_BASIC_RESULTS // safe_page_size)
+                    params["per_page"] = str(safe_page_size)
+                    params["page"] = str(safe_page)
 
                 request_count += 1
                 resp = await client.get(f"{OPENALEX_API_BASE}/works", params=params)
@@ -208,7 +239,8 @@ class OpenAlexConnector(BaseConnector):
                 if resp.status_code == 200:
                     data = resp.json()
                     meta = data.get("meta", {})
-                    next_cursor = meta.get("next_cursor")
+                    next_cursor = meta.get("next_cursor") if cursor else None
+                    count = meta.get("count")
 
                     for work in data.get("results", []):
                         records.append(self._normalize_work(work))
@@ -226,6 +258,25 @@ class OpenAlexConnector(BaseConnector):
             pagination = None
             if next_cursor:
                 pagination = {"next_cursor": next_cursor, "has_more": True}
+            elif (
+                not cursor
+                and count
+                and page * min(per_page, MAX_PER_PAGE) < min(count, MAX_BASIC_RESULTS)
+            ):
+                pagination = {
+                    "page": page,
+                    "next_page": page + 1,
+                    "has_more": True,
+                    "limit_reached": False,
+                }
+            elif not cursor and count and count > MAX_BASIC_RESULTS:
+                pagination = {"page": page, "has_more": False, "limit_reached": True}
+            else:
+                pagination = (
+                    {"page": page, "has_more": False, "limit_reached": False}
+                    if not cursor
+                    else None
+                )
 
             return ConnectorResult(
                 status="succeeded" if not errors else "failed",
@@ -275,6 +326,7 @@ class OpenAlexConnector(BaseConnector):
 
     def _normalize_author(self, raw: dict) -> dict:
         """Normalize OpenAlex author entity to FRIS schema."""
+        author_id = raw.get("id", "").removeprefix("https://openalex.org/")
         orcid_raw = raw.get("orcid") or ""
         orcid = orcid_raw.replace("https://orcid.org/", "").strip() or None
 
@@ -290,9 +342,7 @@ class OpenAlexConnector(BaseConnector):
             "provider_affiliation": "; ".join(affiliations) if affiliations else None,
             "works_count": raw.get("works_count"),
             "cited_by_count": raw.get("cited_by_count"),
-            "source_url": raw.get("id", "").replace(
-                "https://openalex.org/", "https://api.openalex.org/"
-            ),
+            "source_url": f"https://openalex.org/authors/{author_id}",
             "raw_data": raw,
         }
 

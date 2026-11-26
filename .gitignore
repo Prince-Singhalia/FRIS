@@ -29,6 +29,7 @@ node_modules/
 frontend/dist/
 frontend/build/
 frontend/.vite/
+frontend/tsconfig.tsbuildinfo
 .npm
 .eslintcache
 

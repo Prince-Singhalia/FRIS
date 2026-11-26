@@ -165,6 +165,20 @@ export function getConnectors() {
   return request<Connector[]>('/connectors/status')
 }
 
+export function searchOpenAlexAuthors(name: string) {
+  const params = new URLSearchParams({ name })
+  return request<OpenAlexAuthorSearch>(`/search/authors?${params}`)
+}
+
+export function searchOpenAlexOrcid(orcid: string) {
+  return request<OpenAlexAuthorSearch>(`/search/orcid/${encodeURIComponent(orcid)}`)
+}
+
+export function getOpenAlexWorks(authorId: string, page: number, perPage = 25) {
+  const params = new URLSearchParams({ page: String(page), per_page: String(perPage) })
+  return request<OpenAlexWorksPage>(`/authors/${encodeURIComponent(authorId)}/works?${params}`)
+}
+
 export interface TokenResponse {
   access_token: string
   refresh_token: string
@@ -297,6 +311,46 @@ export interface Publication {
     source_url: string | null
     retrieved_at: string | null
   }>
+}
+
+export interface OpenAlexAuthor {
+  id: string
+  name: string
+  orcid: string | null
+  affiliation: string | null
+  works_count: number | null
+  cited_by_count: number | null
+  source_url: string
+  identity_status: 'possible_name_match' | 'provider_identifier_matched'
+}
+
+export interface OpenAlexAuthorSearch {
+  results: OpenAlexAuthor[]
+  count: number
+  source: string
+  retrieved_at: string
+  warnings: string[]
+}
+
+export interface OpenAlexWork {
+  title: string
+  doi: string | null
+  publication_year: number | null
+  venue: string | null
+  publication_type: string | null
+  landing_url: string | null
+  source_url: string
+  citation_count: number | null
+  authors: Array<{ name: string; orcid: string | null }>
+}
+
+export interface OpenAlexWorksPage {
+  results: OpenAlexWork[]
+  count: number
+  pagination: { page: number; next_page?: number; has_more: boolean; limit_reached?: boolean } | null
+  page: number
+  source: string
+  retrieved_at: string
 }
 
 export interface ImportPreview {
