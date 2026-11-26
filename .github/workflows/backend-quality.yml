@@ -6,9 +6,13 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   quality:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: backend
@@ -25,3 +29,22 @@ jobs:
         run: python -m pytest -q
       - name: Run Ruff
         run: python -m ruff check app tests
+      - name: Run Bandit
+        run: python -m bandit -q -r app
+      - name: Audit Python dependencies
+        run: python -m pip_audit --skip-editable
+      - name: Build runtime image
+        run: docker build --tag fris-backend:ci .
+      - name: Scan runtime image
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: fris-backend:ci
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+      - name: Scan for leaked secrets
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

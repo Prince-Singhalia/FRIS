@@ -5,9 +5,10 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime, timedelta
 
+import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
-from jose import JWTError, jwt
+from jwt import InvalidTokenError
 from passlib.context import CryptContext
 
 from app.core.settings import get_settings
@@ -68,7 +69,7 @@ def decode_token(token: str) -> dict:
     try:
         payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
         return payload
-    except JWTError as e:
+    except InvalidTokenError as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=f"Invalid token: {e}",

@@ -24,7 +24,7 @@ from app.core.settings import get_settings
 logger = get_logger(__name__)
 
 ORCID_API_BASE = "https://pub.orcid.org/v3.0"
-ORCID_TOKEN_URL = "https://orcid.org/oauth/token"  # noqa: S105
+ORCID_TOKEN_URL = "https://orcid.org/oauth/token"  # noqa: S105  # nosec B105
 DEFAULT_TIMEOUT = httpx.Timeout(connect=10.0, read=30.0, write=10.0, pool=10.0)
 
 

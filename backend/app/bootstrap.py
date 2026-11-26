@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
-import subprocess
+import subprocess  # nosec B404
 import sys
 from pathlib import Path
 
@@ -13,7 +13,7 @@ from app.core.settings import get_settings
 
 def _run_migrations(backend_dir: Path) -> None:
     """Apply checked-in migrations and fail startup if the database is not ready."""
-    subprocess.run(
+    subprocess.run(  # nosec B603
         [sys.executable, "-m", "alembic", "upgrade", "head"],
         cwd=backend_dir,
         check=True,
@@ -56,9 +56,9 @@ def main() -> None:
     if settings.fris_seed_demo:
         asyncio.run(_seed_demo_data())
 
-    host = os.getenv("BACKEND_HOST", "0.0.0.0")  # noqa: S104
+    host = os.getenv("BACKEND_HOST", "0.0.0.0")  # noqa: S104  # nosec B104
     port = os.getenv("BACKEND_PORT", "8000")
-    os.execv(  # noqa: S606
+    os.execv(  # noqa: S606  # nosec B606
         sys.executable,
         [sys.executable, "-m", "uvicorn", "app.main:app", "--host", host, "--port", port],
     )

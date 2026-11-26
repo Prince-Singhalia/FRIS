@@ -21,24 +21,32 @@
 - Restored the backend Ruff gate by applying safe import/style fixes, formatting the backend, replacing string enums with `StrEnum`, narrowing broad validation assertions, and explicitly allowing FastAPI's dependency-injection defaults.
 - Made the published PostgreSQL host port configurable with `POSTGRES_HOST_PORT`, allowing local startup without changing the container-internal connection port.
 - Fixed Prefect task-result collection in the async discovery flow. Added a unit regression test and confirmed that worker execution updates the job to a terminal state instead of failing with an invalid `await`.
+- Replaced `python-jose` with PyJWT, retained the explicit JWT algorithm allowlist, and added token round-trip and invalid-token tests. Raised pytest and setuptools constraints to versions that address the dependency advisories.
+- Hardened the runtime image to install only application dependencies, remove pip/setuptools, and run without Uvicorn reload. Added a backend `.dockerignore` so local virtualenvs, tests, build output, and caches are not copied into runtime images.
+- Extended backend CI with Bandit, `pip-audit`, a runtime-image build and Trivy scan, and Gitleaks.
 
 ## Validation and environment
 
 Verified in the current continuation:
 
-- `backend/.venv/bin/python -m pytest -q`: **59 passed** (Python 3.11.17).
+- `backend/.venv/bin/python -m pytest -q`: **61 passed** (Python 3.11.17).
 - `backend/.venv/bin/python -m ruff check app tests`: passed.
 - `backend/.venv/bin/python -m compileall -q app tests`: passed.
+- `backend/.venv/bin/python -m bandit -q -r app`: passed. Bandit reports a warning for the scoped B104 suppression on the intentional container bind address.
+- `backend/.venv/bin/python -m pip_audit --skip-editable`: no known vulnerabilities.
+- Built runtime image imports for PyJWT and the FastAPI application passed. Confirmed the image excludes `.venv`, tests, pip, and pytest; Trivy found no HIGH or CRITICAL vulnerabilities.
 - `docker compose config -q` with disposable local credentials: passed.
 - `docker compose up -d --build` with disposable local credentials and `POSTGRES_HOST_PORT=55432`: all services started; the database became healthy, migration revision `20261124_0001` was current, and API readiness returned `{"status":"ready","database":"connected"}`.
 - Explicit demo startup seeded the demo tenant/admin and external researcher. Tenant login and `/auth/me` succeeded.
 - Manual API discovery submitted to Prefect and completed with job status `succeeded`. OpenAlex (1 record), Crossref (11 records), and Semantic Scholar (10 records) reported `succeeded` in that run. This was a real local worker run and live provider request, not a mock.
 - A first live run exposed the flow-result bug; the flow persisted a failed job as intended. After the fix, the rebuilt worker completed successfully.
+- After the PyJWT and runtime-image changes, the rebuilt API passed readiness, tenant-specific login and `/auth/me`; a new Prefect discovery run completed with `succeeded` and three connector runs.
 - `git diff --check`: passed.
 
 Not verified / blocked:
 
 - `mypy app` reports 33 existing type errors across auth, settings, API response construction, seeding, and discovery submission; mypy is not currently a CI gate.
+- Gitleaks is configured in CI but has not been run locally.
 - The default host port 5432 is occupied by an unrelated local container; FRIS was verified on host port 55432. The unrelated container was left untouched.
 - Broader PostgreSQL API integration, cross-tenant denial, failure injection, repeated-run persistence, and staging remain unverified.
 
