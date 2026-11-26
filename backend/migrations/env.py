@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
-from logging.config import fileConfig
 
 from alembic import context
 from sqlalchemy import pool
@@ -14,9 +13,9 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 # Add backend to sys.path for model imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+from app.core.settings import get_settings  # noqa: E402
 from app.db.base import Base  # noqa: E402
 from app.db.models import *  # noqa: E402, F401, F403 — ensure all models registered
-from app.core.settings import get_settings  # noqa: E402
 
 config = context.config
 

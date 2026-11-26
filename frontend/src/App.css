@@ -2128,3 +2128,215 @@ select:focus-visible {
     text-align: right;
   }
 }
+
+.openalex-search-panel {
+  margin-bottom: 22px;
+  padding: 20px;
+}
+
+.openalex-mode {
+  display: inline-flex;
+  gap: 4px;
+  margin-bottom: 16px;
+  padding: 4px;
+  border-radius: 8px;
+  background: #eef2f5;
+}
+
+.openalex-mode button {
+  padding: 8px 15px;
+  border: 0;
+  border-radius: 6px;
+  color: #657487;
+  background: transparent;
+  cursor: pointer;
+}
+
+.openalex-mode button.selected {
+  color: #173c36;
+  background: #fff;
+  box-shadow: 0 1px 3px #15253b1a;
+}
+
+.openalex-search-form {
+  display: flex;
+  gap: 10px;
+}
+
+.openalex-search-form input {
+  width: 100%;
+  min-width: 0;
+  padding: 11px 13px;
+  border: 1px solid #d8dee7;
+  border-radius: 7px;
+  color: #26374d;
+  background: #fff;
+}
+
+.openalex-note {
+  margin: 12px 0 0;
+  color: #758194;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.openalex-results,
+.openalex-profile {
+  margin-bottom: 22px;
+  padding: 21px;
+}
+
+.openalex-candidate {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 4px;
+  border: 0;
+  border-top: 1px solid #edf0f3;
+  color: #243449;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.openalex-candidate:hover .openalex-identity strong,
+.openalex-select {
+  color: #187968;
+}
+
+.openalex-avatar {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 50%;
+  color: #173c36;
+  background: #d9eee8;
+  font-weight: 700;
+}
+
+.openalex-identity {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.openalex-identity small,
+.openalex-table small {
+  color: #758194;
+  font-size: 11px;
+}
+
+.openalex-select {
+  margin-left: auto;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.openalex-profile-heading {
+  align-items: flex-start;
+}
+
+.openalex-profile-heading p:not(.eyebrow) {
+  margin: 7px 0 0;
+  color: #68778a;
+  font-size: 13px;
+}
+
+.openalex-profile-heading > a,
+.openalex-table a {
+  color: #187968;
+  font-size: 12px;
+  text-decoration: none;
+}
+
+.openalex-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 18px 0;
+  border: 1px solid #e8edf1;
+  border-radius: 8px;
+}
+
+.openalex-stats div {
+  display: grid;
+  gap: 5px;
+  padding: 13px 16px;
+  border-right: 1px solid #e8edf1;
+}
+
+.openalex-stats div:last-child {
+  border-right: 0;
+}
+
+.openalex-stats strong {
+  color: #26374d;
+  font-size: 20px;
+}
+
+.openalex-stats small {
+  color: #8793a2;
+  font-size: 9px;
+  letter-spacing: .07em;
+}
+
+.openalex-publication-heading {
+  margin-top: 24px;
+}
+
+.openalex-table-wrap {
+  overflow-x: auto;
+}
+
+.openalex-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  text-align: left;
+}
+
+.openalex-table th,
+.openalex-table td {
+  padding: 11px 9px;
+  border-top: 1px solid #edf0f3;
+  vertical-align: top;
+}
+
+.openalex-table th {
+  color: #8490a0;
+  font-size: 9px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.openalex-table td:first-child {
+  min-width: 260px;
+}
+
+.openalex-table td:first-child strong,
+.openalex-table td:first-child small,
+.openalex-table td:nth-child(3) small {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.openalex-load {
+  margin-top: 14px;
+}
+
+@media (max-width: 620px) {
+  .openalex-search-form {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .openalex-profile-heading {
+    flex-direction: column;
+  }
+
+  .openalex-stats div {
+    padding: 11px 9px;
+  }
+}

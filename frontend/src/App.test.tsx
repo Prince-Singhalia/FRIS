@@ -13,6 +13,7 @@ const api = vi.hoisted(() => ({
   getFacultyProfile: vi.fn(),
   getFacultyPublications: vi.fn(),
   getJobs: vi.fn(),
+  getOpenAlexWorks: vi.fn(),
   getReviews: vi.fn(),
   getSessionToken: vi.fn(),
   getUser: vi.fn(),
@@ -20,6 +21,8 @@ const api = vi.hoisted(() => ({
   login: vi.fn(),
   previewFacultyImport: vi.fn(),
   startDiscovery: vi.fn(),
+  searchOpenAlexAuthors: vi.fn(),
+  searchOpenAlexOrcid: vi.fn(),
 }))
 
 vi.mock('./api', () => api)
@@ -216,5 +219,99 @@ describe('App authentication flow', () => {
       'Confirmed against the source record',
     ))
     expect(await screen.findByRole('status')).toHaveTextContent('Review accepted.')
+  })
+
+  it('searches researcher candidates and paginates source-linked publications', async () => {
+    api.getSessionToken.mockReturnValue('existing-access-token')
+    api.searchOpenAlexAuthors.mockResolvedValue({
+      results: [{
+        id: 'https://openalex.org/A123',
+        name: 'Ada Researcher',
+        orcid: '0000-0002-7481-0810',
+        affiliation: 'Example University',
+        works_count: 2,
+        cited_by_count: 7,
+        source_url: 'https://openalex.org/authors/A123',
+        identity_status: 'possible_name_match',
+      }],
+      count: 1,
+      source: 'OpenAlex',
+      retrieved_at: '2026-11-26T00:00:00Z',
+      warnings: [],
+    })
+    api.getOpenAlexWorks
+      .mockResolvedValueOnce({
+        results: [{
+          title: 'Evidence led research', doi: '10.1000/example', publication_year: 2025,
+          venue: 'Research Journal', publication_type: 'article', landing_url: 'https://example.org/work',
+          source_url: 'https://openalex.org/W1', citation_count: 3, authors: [{ name: 'Ada Researcher', orcid: null }],
+        }],
+        count: 2,
+        pagination: { page: 1, next_page: 2, has_more: true },
+        page: 1,
+        source: 'OpenAlex',
+        retrieved_at: '2026-11-26T00:00:00Z',
+      })
+      .mockResolvedValueOnce({
+        results: [{
+          title: 'A second work', doi: null, publication_year: 2024, venue: null,
+          publication_type: 'article', landing_url: null, source_url: 'https://openalex.org/W2',
+          citation_count: 1, authors: [{ name: 'Ada Researcher', orcid: null }],
+        }],
+        count: 2,
+        pagination: { page: 2, has_more: false },
+        page: 2,
+        source: 'OpenAlex',
+        retrieved_at: '2026-11-26T00:00:00Z',
+      })
+
+    render(<App />)
+    await screen.findByText('Good research starts with good evidence.')
+    fireEvent.click(screen.getByRole('button', { name: 'Research search' }))
+    fireEvent.change(screen.getByLabelText('Researcher name'), { target: { value: 'Ada Researcher' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Search researchers' }))
+    fireEvent.click(await screen.findByRole('button', { name: /Ada Researcher/ }))
+
+    expect(await screen.findByText('Evidence led research')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'doi.org/10.1000/example' })).toHaveAttribute('href', 'https://doi.org/10.1000/example')
+    expect(screen.getByRole('link', { name: 'OpenAlex ↗' })).toHaveAttribute('href', 'https://example.org/work')
+    fireEvent.click(screen.getByRole('button', { name: 'Load more publications' }))
+
+    expect(await screen.findByText('A second work')).toBeInTheDocument()
+    expect(api.getOpenAlexWorks).toHaveBeenNthCalledWith(1, 'https://openalex.org/A123', 1)
+    expect(api.getOpenAlexWorks).toHaveBeenNthCalledWith(2, 'https://openalex.org/A123', 2)
+  })
+
+  it('uses the exact ORCID search API when ORCID mode is selected', async () => {
+    api.getSessionToken.mockReturnValue('existing-access-token')
+    api.searchOpenAlexOrcid.mockResolvedValue({ results: [], count: 0, source: 'OpenAlex', retrieved_at: '', warnings: [] })
+    render(<App />)
+    await screen.findByText('Good research starts with good evidence.')
+    fireEvent.click(screen.getByRole('button', { name: 'Research search' }))
+    fireEvent.click(screen.getByRole('button', { name: 'ORCID' }))
+    fireEvent.change(screen.getByLabelText('ORCID'), { target: { value: '0000-0002-7481-0810' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Search researchers' }))
+
+    await waitFor(() => expect(api.searchOpenAlexOrcid).toHaveBeenCalledWith('0000-0002-7481-0810'))
+    expect(api.searchOpenAlexAuthors).not.toHaveBeenCalled()
+  })
+
+  it('shows empty and provider failure states for researcher search', async () => {
+    api.getSessionToken.mockReturnValue('existing-access-token')
+    api.searchOpenAlexAuthors
+      .mockResolvedValueOnce({ results: [], count: 0, source: 'OpenAlex', retrieved_at: '', warnings: [] })
+      .mockRejectedValueOnce(new Error('OpenAlex author search failed'))
+    render(<App />)
+    await screen.findByText('Good research starts with good evidence.')
+    fireEvent.click(screen.getByRole('button', { name: 'Research search' }))
+
+    const query = screen.getByLabelText('Researcher name')
+    fireEvent.change(query, { target: { value: 'No matching researcher' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Search researchers' }))
+    expect(await screen.findByText('No matching researchers found')).toBeInTheDocument()
+
+    fireEvent.change(query, { target: { value: 'Provider error case' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Search researchers' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('OpenAlex author search failed')
   })
 })

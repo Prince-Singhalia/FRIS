@@ -54,11 +54,16 @@ class Settings(BaseSettings):
     refresh_token_expire_days: int = 7
 
     # --- CORS ---
-    backend_cors_origins: str = "http://localhost:5173,http://localhost:3000"
+    backend_cors_origins: str = (
+        "http://localhost:5173,http://127.0.0.1:5173,"
+        "http://localhost:5174,http://127.0.0.1:5174,"
+        "http://localhost:3000,http://127.0.0.1:3000"
+    )
 
     @property
     def cors_origins(self) -> list[str]:
-        return [o.strip() for o in self.backend_cors_origins.split(",") if o.strip()]
+        origins = (origin.strip().rstrip("/") for origin in self.backend_cors_origins.split(","))
+        return list(dict.fromkeys(origin for origin in origins if origin))
 
     # --- Prefect ---
     prefect_api_url: str = "http://localhost:4200/api"
