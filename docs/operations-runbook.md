@@ -7,6 +7,8 @@
 3. Keep `FRIS_SEED_DEMO=false` unless you intentionally want the isolated demo tenant. To seed locally, set it to `true` and set `ADMIN_DEFAULT_PASSWORD` to a unique value with at least 12 characters. Seeding is rejected in `APP_ENV=production`.
 4. Start the stack with `docker compose up --build`.
 
+If host port 5432 is already in use, change `POSTGRES_HOST_PORT` in `.env` (for example, `55432`). `POSTGRES_PORT` remains the port used by services to connect to PostgreSQL inside Compose.
+
 The API waits for PostgreSQL health, applies `alembic upgrade head`, optionally seeds the demo data, then starts. The Prefect bootstrap registers `fris-discovery/manual` in the `fris-pool`; the process worker runs that deployment. Required setup failures stop the affected service.
 
 ## Local endpoints

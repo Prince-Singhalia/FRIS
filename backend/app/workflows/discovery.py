@@ -7,9 +7,11 @@ deduplicates, and persists canonical records.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime
 
 from prefect import flow, get_run_logger, task
@@ -858,7 +860,9 @@ async def _execute_discovery_flow(
     for provider in selected_sources:
         provider_futures.append(search_provider_authors.submit(provider, faculty_profile))
 
-    provider_results = [await f.result() for f in provider_futures]
+    provider_results = await _collect_provider_results(
+        [future.result for future in provider_futures]
+    )
 
     # 3. Score candidates
     scored_candidates = await score_candidates(provider_results, faculty_profile)
@@ -958,6 +962,11 @@ def _get_connector(provider_name: str):
     }
     cls = connectors.get(provider_name)
     return cls() if cls else None
+
+
+async def _collect_provider_results(result_callbacks: list[Callable[[], dict]]) -> list[dict]:
+    """Wait for Prefect's synchronous future results without blocking the flow loop."""
+    return await asyncio.gather(*(asyncio.to_thread(result) for result in result_callbacks))
 
 
 def _map_connector_status(status_str: str):

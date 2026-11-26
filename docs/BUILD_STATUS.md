@@ -19,22 +19,28 @@
 - Reworked Compose to remove the nonexistent frontend service and hidden `|| true` startup fallbacks. Database credentials and signing key must be configured; the Prefect work pool and manual deployment are registered before the API starts.
 - Organized reference files under `docs/specifications/` and `docs/archive/`; removed the two redundant Antigravity prompt files. The team handoff remains outside this repository in the parent `CICD PROJECT` directory.
 - Restored the backend Ruff gate by applying safe import/style fixes, formatting the backend, replacing string enums with `StrEnum`, narrowing broad validation assertions, and explicitly allowing FastAPI's dependency-injection defaults.
+- Made the published PostgreSQL host port configurable with `POSTGRES_HOST_PORT`, allowing local startup without changing the container-internal connection port.
+- Fixed Prefect task-result collection in the async discovery flow. Added a unit regression test and confirmed that worker execution updates the job to a terminal state instead of failing with an invalid `await`.
 
 ## Validation and environment
 
 Verified in the current continuation:
 
-- `backend/.venv/bin/python -m pytest -q`: **58 passed** (Python 3.11.17).
+- `backend/.venv/bin/python -m pytest -q`: **59 passed** (Python 3.11.17).
 - `backend/.venv/bin/python -m ruff check app tests`: passed.
 - `backend/.venv/bin/python -m compileall -q app tests`: passed.
 - `docker compose config -q` with disposable local credentials: passed.
+- `docker compose up -d --build` with disposable local credentials and `POSTGRES_HOST_PORT=55432`: all services started; the database became healthy, migration revision `20261124_0001` was current, and API readiness returned `{"status":"ready","database":"connected"}`.
+- Explicit demo startup seeded the demo tenant/admin and external researcher. Tenant login and `/auth/me` succeeded.
+- Manual API discovery submitted to Prefect and completed with job status `succeeded`. OpenAlex (1 record), Crossref (11 records), and Semantic Scholar (10 records) reported `succeeded` in that run. This was a real local worker run and live provider request, not a mock.
+- A first live run exposed the flow-result bug; the flow persisted a failed job as intended. After the fix, the rebuilt worker completed successfully.
 - `git diff --check`: passed.
 
 Not verified / blocked:
 
 - `mypy app` reports 33 existing type errors across auth, settings, API response construction, seeding, and discovery submission; mypy is not currently a CI gate.
-- Compose startup did not complete because an unrelated local container already occupies host port 5432. The partially started FRIS containers were stopped and removed; the existing container was left untouched.
-- PostgreSQL migrations, seed/login, real Prefect worker execution, API/database integration, and live provider calls remain unverified. Docker is available and running; Python 3.11.17 is available.
+- The default host port 5432 is occupied by an unrelated local container; FRIS was verified on host port 55432. The unrelated container was left untouched.
+- Broader PostgreSQL API integration, cross-tenant denial, failure injection, repeated-run persistence, and staging remain unverified.
 
 ## Remaining work
 
@@ -42,14 +48,13 @@ Not verified / blocked:
 
 - Resolve the 33 mypy findings and add a supported type-check gate after those errors are fixed.
 - Run `alembic upgrade head` and `alembic downgrade base` against a clean PostgreSQL database. Replace the metadata-driven initial revision with a frozen explicit baseline if the team wants immutable schema definitions before shipping.
-- Start Compose on an available host port with a configured `.env`; verify migration, explicit seed, login, tenant isolation, manual Prefect submission, worker execution, flow failure state, and repeat-run persistence.
-- Add PostgreSQL API integration tests for cross-tenant denial, import behavior, idempotency, and Prefect submission failure/success.
+- Add PostgreSQL API integration tests for cross-tenant denial, import behavior, persistence idempotency, and Prefect submission failure/success; repeat-run persistence has not yet been checked end to end.
 - Decide and implement the approved auto-discovery behavior for newly created/imported faculty; the current API provides an explicit manual discovery trigger.
 
 ### Prince — provider ingestion
 
 - Verify provider documentation and adapter behavior; add contract tests for paging, malformed responses, authentication/rate limits, timeout, and partial provider failures.
-- Preserve provider provenance and ensure an unavailable provider is never counted as success. Live calls remain unverified.
+- Preserve provider provenance and ensure an unavailable provider is never counted as success. One live run exercised OpenAlex, Crossref, and Semantic Scholar; broader provider behavior remains unverified.
 
 ### Yash — matching and deduplication
 
@@ -61,4 +66,4 @@ Not verified / blocked:
 
 ## Key limitations
 
-There is no frontend, no end-to-end database/API coverage, no live-provider verification, and no configured staging deployment. The backend unit tests and Ruff checks pass, but database/worker behavior remains unverified. The team should not describe FRIS as a complete or production-ready pilot until the integration gates in the implementation brief pass.
+There is no frontend, no end-to-end database/API test suite, no broad provider verification, and no configured staging deployment. The backend unit tests and Ruff checks pass, and one local worker run succeeded; broader database/API behavior remains unverified. The team should not describe FRIS as a complete or production-ready pilot until the integration gates in the implementation brief pass.

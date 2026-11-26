@@ -74,11 +74,11 @@ python -m pytest -q
 python -m ruff check app tests
 ```
 
-These commands are documented for contributors; this implementation session did not run them. No live provider calls or container startup were performed in this environment.
+These commands are run by the backend CI workflow. See [the current build status](docs/BUILD_STATUS.md) for the latest local test and container-verification results.
 
 ## Data sources and limits
 
-FRIS targets official/public interfaces only: [OpenAlex](https://docs.openalex.org/), [Crossref REST API](https://www.crossref.org/documentation/retrieve-metadata/rest-api/), [ORCID API](https://info.orcid.org/documentation/api-tutorials/), and [Semantic Scholar API](https://api.semanticscholar.org/api-docs/). Follow provider authentication, rate limits, retention terms, and attribution rules. Do not scrape Google Scholar or bypass publisher access controls. No live connector success is claimed by this repository status.
+FRIS targets official/public interfaces only: [OpenAlex](https://docs.openalex.org/), [Crossref REST API](https://www.crossref.org/documentation/retrieve-metadata/rest-api/), [ORCID API](https://info.orcid.org/documentation/api-tutorials/), and [Semantic Scholar API](https://api.semanticscholar.org/api-docs/). Follow provider authentication, rate limits, retention terms, and attribution rules. Do not scrape Google Scholar or bypass publisher access controls. A live local discovery run was verified; see [the build status](docs/BUILD_STATUS.md) for exact outcomes. Provider availability and coverage are not guaranteed.
 
 ## Security and privacy
 
