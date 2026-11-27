@@ -87,7 +87,7 @@ class SemanticScholarConnector(BaseConnector):
                 fields = "authorId,externalIds,name,affiliations,paperCount,citationCount,url"
                 params = {
                     "query": faculty_name,
-                    "limit": "10",
+                    "limit": str(MAX_LIMIT),
                     "fields": fields,
                 }
                 request_count += 1

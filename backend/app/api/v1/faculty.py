@@ -9,7 +9,7 @@ import uuid
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import TokenData, get_current_user, require_roles
@@ -23,6 +23,11 @@ from app.db.models import (
     IdentifierType,
     ResearchInterest,
     Tenant,
+    DiscoveryJob,
+    SyncCheckpoint,
+    AuthorCandidate,
+    MatchDecision,
+    FacultyPublicationMatch,
     VerificationStatus,
 )
 from app.db.session import get_db
@@ -231,6 +236,42 @@ async def create_faculty(
         **faculty_data,
         discovery_job=DiscoveryJobResponse.model_validate(discovery_job),
     )
+
+
+@router.delete("/{faculty_id}", status_code=204)
+async def delete_faculty(
+    faculty_id: uuid.UUID,
+    current_user: TokenData = Depends(require_roles("admin", "research_officer")),
+    db: AsyncSession = Depends(get_db),
+):
+    tenant_id = uuid.UUID(current_user.tenant_id)
+    result = await db.execute(
+        select(Faculty).where(Faculty.id == faculty_id, Faculty.tenant_id == tenant_id)
+    )
+    faculty = result.scalar_one_or_none()
+    if faculty is None:
+        raise HTTPException(status_code=404, detail="Faculty profile not found")
+
+    await db.execute(delete(MatchDecision).where(MatchDecision.faculty_id == faculty_id))
+    await db.execute(delete(AuthorCandidate).where(AuthorCandidate.faculty_id == faculty_id))
+    await db.execute(
+        delete(FacultyPublicationMatch).where(FacultyPublicationMatch.faculty_id == faculty_id)
+    )
+    await db.execute(delete(SyncCheckpoint).where(SyncCheckpoint.faculty_id == faculty_id))
+    await db.execute(delete(DiscoveryJob).where(DiscoveryJob.faculty_id == faculty_id))
+    name = faculty.full_name
+    await db.delete(faculty)
+    db.add(
+        AuditEvent(
+            tenant_id=tenant_id,
+            user_id=uuid.UUID(current_user.user_id),
+            action=AuditAction.faculty_deleted,
+            entity_type="faculty",
+            entity_id=faculty_id,
+            detail={"full_name": name},
+        )
+    )
+    await db.flush()
 
 
 @router.get("", response_model=PaginatedResponse)

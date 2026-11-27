@@ -3,6 +3,7 @@ import type { FormEvent, ReactNode } from 'react'
 import {
   clearSession,
   createFaculty,
+  deleteFaculty,
   decideReview,
   getConnectors,
   getDashboard,
@@ -12,6 +13,7 @@ import {
   getFacultyPublications,
   getJobs,
   getOpenAlexWorks,
+  getSemanticScholarWorks,
   getReviews,
   getSessionToken,
   getUser,
@@ -192,7 +194,7 @@ function App() {
       <div className="main-column">
         <header className="topbar">
           <div className="mobile-brand"><span className="brand-mark">F</span><strong>FRIS</strong></div>
-          <div className="breadcrumb">Research operations <span>/</span> <strong>{selectedFaculty ? 'Faculty profile' : pageTitle(page)}</strong></div>
+          <div className="breadcrumb"><button className="back-button" onClick={() => selectedFaculty ? setSelectedFaculty(null) : navigate('dashboard')} disabled={!selectedFaculty && page === 'dashboard'} aria-label="Go back">← Back</button><span>Research operations /</span> <strong>{selectedFaculty ? 'Faculty profile' : pageTitle(page)}</strong></div>
           <div className="topbar-meta"><span className="secure-label"><span className="status-dot" />Secure workspace</span><span className="avatar avatar-small">{initials(user.full_name)}</span></div>
         </header>
         <main className="page-content">
@@ -226,9 +228,11 @@ function OpenAlexSearchPage() {
   const [query, setQuery] = useState('')
   const [mode, setMode] = useState<'name' | 'orcid'>('name')
   const [candidates, setCandidates] = useState<OpenAlexAuthor[]>([])
+  const [candidateCursor, setCandidateCursor] = useState<string | undefined>()
   const [selected, setSelected] = useState<OpenAlexAuthor | null>(null)
   const [works, setWorks] = useState<OpenAlexWork[]>([])
   const [page, setPage] = useState(1)
+  const [worksCursor, setWorksCursor] = useState<string | undefined>()
   const [hasMore, setHasMore] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -246,6 +250,7 @@ function OpenAlexSearchPage() {
         ? await searchOpenAlexOrcid(query.trim())
         : await searchOpenAlexAuthors(query.trim())
       setCandidates(result.results)
+      setCandidateCursor(result.pagination?.next_cursor)
     } catch (reason) {
       setError(messageFrom(reason))
       setCandidates([])
@@ -254,24 +259,59 @@ function OpenAlexSearchPage() {
     }
   }
 
-  async function loadWorks(author: OpenAlexAuthor, requestedPage = 1) {
-    if (busy) return
+  async function loadMoreCandidates() {
+    if (!candidateCursor || busy) return
     setBusy(true)
     setError('')
-    if (requestedPage === 1) {
+    try {
+      const result = await searchOpenAlexAuthors(query.trim(), candidateCursor)
+      setCandidates((current) => {
+        const seen = new Set(current.map((candidate) => `${candidate.provider}:${candidate.id}`))
+        return [...current, ...result.results.filter((candidate) => !seen.has(`${candidate.provider}:${candidate.id}`))]
+      })
+      setCandidateCursor(result.pagination?.next_cursor)
+    } catch (reason) {
+      setError(messageFrom(reason))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function loadWorks(author: OpenAlexAuthor, requestedPage = 1, requestedCursor?: string) {
+    if (busy) return
+    const firstPage = requestedPage === 1 && !requestedCursor
+    setBusy(true)
+    setError('')
+    if (firstPage) {
       setSelected(author)
       setWorks([])
       setPage(1)
+      setWorksCursor(undefined)
     }
     try {
-      const result = await getOpenAlexWorks(author.id, requestedPage)
+      const primaryRequest = author.provider === 'openalex'
+        ? getOpenAlexWorks(author.id, requestedPage)
+        : author.provider === 'semantic_scholar'
+          ? getSemanticScholarWorks(author.id, requestedCursor)
+          : Promise.resolve({ results: [], count: 0, pagination: null, source: 'Institution directory', retrieved_at: new Date().toISOString() })
+      // Crossref name searches are not identity-safe: a common name can return
+      // another researcher's publications. Only show works returned for the
+      // selected provider author identifier.
+      const primary = await primaryRequest
+      const incoming = primary.results
       setWorks((current) => {
-        if (requestedPage === 1) return result.results
-        const seen = new Set(current.map((work) => work.doi || work.source_url))
-        return [...current, ...result.results.filter((work) => !seen.has(work.doi || work.source_url))]
+        const combined = firstPage ? incoming : [...current, ...incoming]
+        const seen = new Set<string>()
+        return combined.filter((work) => {
+          const key = (work.doi || work.provider_work_id || work.source_url || work.title).toLowerCase()
+          if (seen.has(key)) return false
+          seen.add(key)
+          return true
+        })
       })
       setPage(requestedPage)
-      setHasMore(Boolean(result.pagination?.has_more))
+      setWorksCursor(primary.pagination?.next_cursor)
+      setHasMore(author.provider !== 'institution' && Boolean(primary.pagination?.has_more))
     } catch (reason) {
       setError(messageFrom(reason))
     } finally {
@@ -281,7 +321,7 @@ function OpenAlexSearchPage() {
 
   return (
     <section className="openalex-search">
-      <PageHeading eyebrow="OpenAlex · public scholarly metadata" title="Researcher search" detail="Search by name to review possible matches, or use an ORCID for an exact identifier lookup. Select a profile to retrieve its publication records." />
+      <PageHeading eyebrow="OpenAlex · Semantic Scholar · Crossref" title="Researcher search" detail="Search names across OpenAlex and Semantic Scholar. Publications are loaded only from the selected provider identity; Crossref name-only matches are not merged. ORCID lookup remains exact." />
       <section className="panel openalex-search-panel" aria-label="Researcher search form">
         <div className="openalex-mode" role="group" aria-label="Search type">
           <button className={mode === 'name' ? 'selected' : ''} aria-pressed={mode === 'name'} onClick={() => setMode('name')}>Name</button>
@@ -292,33 +332,34 @@ function OpenAlexSearchPage() {
           <input id="openalex-query" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={mode === 'name' ? 'Enter a researcher name' : '0000-0000-0000-0000'} />
           <button className="button button-primary" disabled={busy || query.trim().length < 2}>{busy ? 'Searching…' : 'Search researchers'}</button>
         </form>
-        <p className="openalex-note">Name search returns candidates for you to confirm. ORCID lookup validates the identifier and never falls back to a name search.</p>
+        <p className="openalex-note">Name results include up to 200 OpenAlex and 100 Semantic Scholar candidates per provider. Crossref is a publication registry, but name-only records are not merged into a selected profile because names are ambiguous. ORCID lookup validates the identifier and never falls back to a name search.</p>
       </section>
 
       {error && <ErrorState message={error} onRetry={() => selected ? void loadWorks(selected, page) : void search()} />}
-      {searched && busy && !selected && <Loading label="Searching OpenAlex" />}
+      {searched && busy && !selected && <Loading label="Searching scholarly sources" />}
       {searched && !busy && !error && !selected && (
         <section className="panel openalex-results">
-          <div className="panel-heading"><div><p className="eyebrow">Researcher matches</p><h2>{candidates.length} {candidates.length === 1 ? 'candidate' : 'candidates'} found</h2></div><span className="subtle-tag">Source: OpenAlex</span></div>
+          <div className="panel-heading"><div><p className="eyebrow">Researcher matches</p><h2>{candidates.length} {candidates.length === 1 ? 'candidate' : 'candidates'} found</h2></div><span className="subtle-tag">Sources: OpenAlex + Semantic Scholar</span></div>
           {candidates.length === 0 ? <EmptyState title="No matching researchers found" detail="Try another spelling or check the ORCID identifier." /> : candidates.map((author) => (
-            <button className="openalex-candidate" key={author.id} onClick={() => void loadWorks(author)}>
+            <button className="openalex-candidate" key={`${author.provider}:${author.id}`} onClick={() => void loadWorks(author)}>
               <span className="openalex-avatar">{author.name.slice(0, 1) || '?'}</span>
-              <span className="openalex-identity"><strong>{author.name}</strong><small>{author.affiliation || 'Affiliation not available'} · {author.works_count ?? '—'} works</small><small>{author.identity_status === 'provider_identifier_matched' ? 'Provider identifier matched' : 'Possible name match · confirm identity'}</small></span>
+              <span className="openalex-identity"><strong>{author.name}</strong><small>{author.provider === 'openalex' ? 'OpenAlex' : author.provider === 'semantic_scholar' ? 'Semantic Scholar' : 'UPES faculty directory'} · {author.affiliation || 'Affiliation not available'} · {author.works_count ?? '—'} works</small><small>{author.identity_status === 'provider_identifier_matched' ? 'Provider identifier matched' : author.identity_status === 'institution_profile_match' ? 'Institution profile match' : 'Possible name match · confirm identity'}</small></span>
               <span className="openalex-select">View profile →</span>
             </button>
           ))}
+          {candidateCursor && <button className="button button-secondary openalex-load" disabled={busy} onClick={() => void loadMoreCandidates()}>{busy ? 'Searching…' : 'Load more researcher matches'}</button>}
         </section>
       )}
 
       {selected && <section className="panel openalex-profile">
-        <div className="panel-heading openalex-profile-heading"><div><p className="eyebrow">Researcher profile · OpenAlex</p><h2>{selected.name}</h2><p>{selected.affiliation || 'Affiliation not available'}</p><p>{selected.orcid ? <>ORCID <a href={`https://orcid.org/${selected.orcid}`} target="_blank" rel="noreferrer">{selected.orcid}</a></> : 'ORCID not listed'} · {selected.identity_status.replaceAll('_', ' ')}</p></div><a href={selected.source_url} target="_blank" rel="noreferrer">OpenAlex profile ↗</a></div>
+        <div className="panel-heading openalex-profile-heading"><div><p className="eyebrow">Researcher profile · {selected.provider === 'openalex' ? 'OpenAlex' : selected.provider === 'semantic_scholar' ? 'Semantic Scholar' : 'Institution directory'}</p><h2>{selected.name}</h2><p>{selected.affiliation || 'Affiliation not available'}</p><p>{selected.orcid ? <>ORCID <a href={`https://orcid.org/${selected.orcid}`} target="_blank" rel="noreferrer">{selected.orcid}</a></> : 'ORCID not listed'} · {selected.identity_status.replaceAll('_', ' ')}</p></div><span>{selected.source_url && <a href={selected.source_url} target="_blank" rel="noreferrer">{selected.provider === 'openalex' ? 'OpenAlex' : selected.provider === 'semantic_scholar' ? 'Semantic Scholar' : 'UPES faculty page'} ↗</a>}{selected.linkedin_url && <> · <a href={selected.linkedin_url} target="_blank" rel="noreferrer">LinkedIn ↗</a></>}</span></div>
         <div className="openalex-stats"><div><strong>{works.length}</strong><small>PUBLICATIONS LOADED</small></div><div><strong>{selected.works_count ?? '—'}</strong><small>OPENALEX WORKS</small></div><div><strong>{selected.cited_by_count ?? '—'}</strong><small>CITATIONS</small></div></div>
-        <p className="openalex-note">OpenAlex coverage can be incomplete. These records are source metadata and are not a verified complete publication list.</p>
+        <p className="openalex-note">Only publications tied to the selected provider author are shown. Crossref name-only results are intentionally not merged because they can belong to another person.{selected.provider === 'institution' ? ' This profile came from the institution directory; no provider author ID was found yet, so no publications are attributed.' : ''}</p>
         <div className="panel-heading openalex-publication-heading"><div><p className="eyebrow">Live records · newest first</p><h3>Publications</h3></div></div>
-        {works.length === 0 && !busy ? <EmptyState title="No publications returned" detail="OpenAlex did not return works for this researcher." /> : <>
+        {works.length === 0 && !busy ? <EmptyState title="No verified publications returned" detail={selected.provider === 'institution' ? 'This institution profile has no linked OpenAlex or Semantic Scholar author ID yet, so publications are not attributed automatically.' : `No publications were returned by ${selected.provider === 'openalex' ? 'OpenAlex' : 'Semantic Scholar'} for this provider author.`} /> : <>
           {busy && <Loading label="Loading publications" />}
-          <div className="openalex-table-wrap"><table className="openalex-table"><thead><tr><th>Publication</th><th>Year</th><th>Venue</th><th>Citations</th><th>Source</th></tr></thead><tbody>{works.map((work, index) => <tr key={work.doi || work.source_url || index}><td><strong>{work.title || 'Title unavailable'}</strong><small>{work.authors.slice(0, 4).map((author) => author.name).filter(Boolean).join(', ') || 'Authors unavailable'}{work.authors.length > 4 ? ' et al.' : ''}</small>{work.doi && <small><a href={`https://doi.org/${work.doi}`} target="_blank" rel="noreferrer">doi.org/{work.doi}</a></small>}</td><td>{work.publication_year || '—'}</td><td>{work.venue || '—'}<small>{work.publication_type || ''}</small></td><td>{work.citation_count ?? '—'}</td><td><a href={work.landing_url || work.source_url} target="_blank" rel="noreferrer">OpenAlex ↗</a></td></tr>)}</tbody></table></div>
-          {hasMore && <button className="button button-secondary openalex-load" disabled={busy} onClick={() => void loadWorks(selected, page + 1)}>{busy ? 'Loading…' : 'Load more publications'}</button>}
+          <div className="openalex-table-wrap"><table className="openalex-table"><thead><tr><th>Publication</th><th>Year</th><th>Venue</th><th>Citations</th><th>Source</th></tr></thead><tbody>{works.map((work, index) => <tr key={work.doi || work.provider_work_id || work.source_url || index}><td><strong>{work.title || 'Title unavailable'}</strong><small>{work.authors.slice(0, 4).map((author) => author.name).filter(Boolean).join(', ') || 'Authors unavailable'}{work.authors.length > 4 ? ' et al.' : ''}</small>{work.doi && <small><a href={`https://doi.org/${work.doi}`} target="_blank" rel="noreferrer">doi.org/{work.doi}</a></small>}</td><td>{work.publication_year || '—'}</td><td>{work.venue || '—'}<small>{work.publication_type || ''}</small></td><td>{work.citation_count ?? '—'}</td><td><a href={work.landing_url || work.source_url} target="_blank" rel="noreferrer">{work.provider === 'crossref' ? 'Crossref' : work.provider === 'semantic_scholar' ? 'Semantic Scholar' : 'OpenAlex'} ↗</a></td></tr>)}</tbody></table></div>
+          {hasMore && <button className="button button-secondary openalex-load" disabled={busy} onClick={() => void loadWorks(selected, selected.provider === 'openalex' ? page + 1 : page, worksCursor)}>{busy ? 'Loading…' : 'Load more publications'}</button>}
         </>}
       </section>}
     </section>
@@ -501,12 +542,22 @@ function FacultyProfilePage({ id, onBack, canDiscover }: { id: string; onBack: (
       setNotice(`Discovery job ${job.id.slice(0, 8)} was submitted with status “${job.status}”.`)
     } catch (reason) { setNotice(messageFrom(reason)) }
   }
+
+  async function removeFaculty() {
+    if (!window.confirm('Delete this faculty profile and its discovery records? This cannot be undone.')) return
+    try {
+      await deleteFaculty(id)
+      onBack()
+    } catch (reason) {
+      setNotice(messageFrom(reason))
+    }
+  }
   if (loading) return <Loading label="Loading faculty profile" />
   if (error || !data) return <><button className="back-link" onClick={onBack}>← Faculty directory</button><ErrorState message={error || 'Profile is unavailable.'} onRetry={refresh} /></>
   const { profile, summary, publications } = data
   return <>
     <button className="back-link" onClick={onBack}>← Faculty directory</button>
-    <PageHeading eyebrow="Faculty profile" title={profile.full_name} detail={[profile.department, profile.reported_institution].filter(Boolean).join(' · ') || 'Institution details not provided'} action={canDiscover && <button className="button button-primary" onClick={discover}>↻ Discover publications</button>} />
+    <PageHeading eyebrow="Faculty profile" title={profile.full_name} detail={[profile.department, profile.reported_institution].filter(Boolean).join(' · ') || 'Institution details not provided'} action={<div className="button-row">{canDiscover && <button className="button button-primary" onClick={discover}>↻ Discover publications</button>}{canDiscover && <button className="button button-danger" onClick={removeFaculty}>Delete profile</button>}</div>} />
     {profile.is_demo && <div className="demo-notice"><strong>DEMO — external researcher.</strong> This researcher is not a member of the customer's university.</div>}
     {notice && <div className="success-banner" role="status">{notice}<button onClick={() => setNotice('')} aria-label="Dismiss">×</button></div>}
     <div className="profile-grid">
@@ -552,13 +603,13 @@ function ReviewsPage({ canDecide }: { canDecide: boolean }) {
   const { data, error, loading, refresh } = useRemote<Paginated<Review>>(load, [pageNumber, status])
   const [busyId, setBusyId] = useState('')
   const [notice, setNotice] = useState('')
+  const [rationales, setRationales] = useState<Record<string, string>>({})
   async function decide(item: Review, decision: 'accept' | 'reject' | 'defer') {
-    const rationale = window.prompt(`Optional rationale for ${decision}ing this item:`)
-    if (rationale === null) return
     setBusyId(item.id); setNotice('')
     try {
-      await decideReview(item.id, decision, rationale.trim() || undefined)
-      setNotice(`Review ${decision}ed.`)
+      const rationale = rationales[item.id]?.trim() || undefined
+      await decideReview(item.id, decision, rationale)
+      setNotice(`Review ${decision}ed successfully.`)
       refresh()
     } catch (reason) { setNotice(messageFrom(reason)) } finally { setBusyId('') }
   }
@@ -566,7 +617,7 @@ function ReviewsPage({ canDecide }: { canDecide: boolean }) {
     <PageHeading eyebrow="Human-in-the-loop" title="Review queue" detail="Review uncertain publication matches and record explicit decisions with an optional rationale." />
     {notice && <div className="success-banner" role="status">{notice}<button onClick={() => setNotice('')} aria-label="Dismiss">×</button></div>}
     <section className="panel table-panel"><div className="table-panel-heading"><div><h2>{status === 'pending' ? 'Needs your attention' : `${status[0].toUpperCase()}${status.slice(1)} reviews`}</h2><p>Decisions are recorded in the audit trail.</p></div><label className="filter-label">Show<select value={status} onChange={(event) => { setStatus(event.target.value); setPageNumber(1) }}><option value="pending">Pending</option><option value="decided">Decided</option><option value="deferred">Deferred</option></select></label></div>
-      {loading ? <Loading /> : error ? <ErrorState message={error} onRetry={refresh} /> : data?.items.length ? <><div className="review-list">{data.items.map((item) => <article className="review-card" key={item.id}><div className="review-priority">{item.priority > 0 ? `P${item.priority}` : '—'}</div><div className="review-content"><div className="review-title-row"><div><span className="eyebrow">{item.review_type.replaceAll('_', ' ')} · {item.entity_type.replaceAll('_', ' ')}</span><h3>{item.explanation || `Review ${item.entity_type} evidence`}</h3></div><span className={`job-status status-${item.status}`}>{item.status}</span></div><p className="review-entity">Record ID <span className="mono">{item.entity_id}</span></p>{item.evidence && <details className="evidence-details"><summary>View evidence</summary><pre>{JSON.stringify(item.evidence, null, 2)}</pre></details>}{canDecide && item.status === 'pending' && <div className="review-actions"><button className="button button-secondary" disabled={busyId === item.id} onClick={() => decide(item, 'defer')}>Defer</button><button className="button button-secondary" disabled={busyId === item.id} onClick={() => decide(item, 'reject')}>Reject</button><button className="button button-primary" disabled={busyId === item.id} onClick={() => decide(item, 'accept')}>{busyId === item.id ? 'Saving…' : 'Accept'}</button></div>}</div></article>)}</div><Pagination current={pageNumber} pages={data.pages} onChange={setPageNumber} /></> : <EmptyState title={status === 'pending' ? 'All caught up' : `No ${status} reviews`} detail={status === 'pending' ? 'There are no review items waiting for a decision.' : 'Items will show here when their review status changes.'} />}
+      {loading ? <Loading /> : error ? <ErrorState message={error} onRetry={refresh} /> : data?.items.length ? <><div className="review-list">{data.items.map((item) => { const evidence = item.evidence ?? {}; return <article className="review-card" key={item.id}><div className="review-priority">{item.priority > 0 ? `P${item.priority}` : '—'}</div><div className="review-content"><div className="review-title-row"><div><span className="eyebrow">{item.review_type.replaceAll('_', ' ')} · {item.entity_type.replaceAll('_', ' ')}</span><h3>{item.explanation || `Review ${item.entity_type} evidence`}</h3></div><span className={`job-status status-${item.status}`}>{item.status}</span></div><div className="review-facts"><span><strong>Faculty</strong> {String(evidence.faculty_name ?? 'Faculty record')}</span><span><strong>Candidate A</strong> {String(evidence.work_a_title ?? '—')}</span><span><strong>Candidate B</strong> {String(evidence.work_b_title ?? '—')}</span><span><strong>Confidence</strong> {String(evidence.similarity ?? 'Manual review')}</span></div><p className="review-entity">Review ID <span className="mono">{item.id}</span></p>{item.evidence && <details className="evidence-details"><summary>View full evidence</summary><pre>{JSON.stringify(item.evidence, null, 2)}</pre></details>}{canDecide && item.status === 'pending' && <div className="review-actions"><textarea aria-label={`Rationale for review ${item.id}`} placeholder="Optional rationale for this decision" value={rationales[item.id] ?? ''} onChange={(event) => setRationales((current) => ({ ...current, [item.id]: event.target.value }))} /><div><button className="button button-secondary" disabled={busyId === item.id} onClick={() => decide(item, 'defer')}>Defer</button><button className="button button-secondary" disabled={busyId === item.id} onClick={() => decide(item, 'reject')}>Reject</button><button className="button button-primary" disabled={busyId === item.id} onClick={() => decide(item, 'accept')}>{busyId === item.id ? 'Saving…' : 'Accept'}</button></div></div>}</div></article> })}</div><Pagination current={pageNumber} pages={data.pages} onChange={setPageNumber} /></> : <EmptyState title={status === 'pending' ? 'All caught up' : `No ${status} reviews`} detail={status === 'pending' ? 'There are no review items waiting for a decision.' : 'Items will show here when their review status changes.'} />}
     </section>
   </>
 }

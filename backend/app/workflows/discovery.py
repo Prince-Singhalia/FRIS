@@ -761,7 +761,11 @@ async def persist_results(
                     entity_type="publication",
                     entity_id=uuid.uuid4(),  # placeholder
                     status="pending",
-                    evidence=ri_data,
+                    evidence={
+                        **ri_data,
+                        "faculty_id": str(fid),
+                        "faculty_name": faculty_profile.get("full_name"),
+                    },
                     explanation=(
                         f"Ambiguous duplicate: {ri_data.get('work_a_title', '')[:80]} "
                         f"vs {ri_data.get('work_b_title', '')[:80]}"

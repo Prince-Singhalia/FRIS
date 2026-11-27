@@ -22,7 +22,14 @@ services:
     environment:
       PREFECT_SERVER_API_HOST: 0.0.0.0
       PREFECT_SERVER_API_PORT: 4200
+      PREFECT_SERVER_EPHEMERAL_ENABLED: "false"
+      PREFECT_API_DATABASE_CONNECTION_URL: sqlite+aiosqlite:////root/.prefect/prefect.db
+      # The server binds on all interfaces, but the browser must call a
+      # reachable host name rather than the non-routable 0.0.0.0 address.
+      PREFECT_UI_API_URL: ${PREFECT_UI_API_URL:-http://localhost:4200/api}
     command: ["prefect", "server", "start", "--host", "0.0.0.0"]
+    volumes:
+      - prefectdata:/root/.prefect
     healthcheck:
       test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:4200/api/health').raise_for_status()"]
       interval: 10s
@@ -125,3 +132,4 @@ services:
 
 volumes:
   pgdata:
+  prefectdata:

@@ -117,6 +117,10 @@ export function getFacultyProfile(id: string) {
   return request<Faculty>(`/faculty/${encodeURIComponent(id)}`)
 }
 
+export function deleteFaculty(id: string) {
+  return request<void>(`/faculty/${encodeURIComponent(id)}`, { method: 'DELETE' })
+}
+
 export function getFacultyDashboard(id: string) {
   return request<FacultySummary>(`/dashboard/faculty/${encodeURIComponent(id)}`)
 }
@@ -165,13 +169,25 @@ export function getConnectors() {
   return request<Connector[]>('/connectors/status')
 }
 
-export function searchOpenAlexAuthors(name: string) {
+export function searchOpenAlexAuthors(name: string, cursor?: string) {
   const params = new URLSearchParams({ name })
+  if (cursor) params.set('cursor', cursor)
   return request<OpenAlexAuthorSearch>(`/search/authors?${params}`)
 }
 
 export function searchOpenAlexOrcid(orcid: string) {
   return request<OpenAlexAuthorSearch>(`/search/orcid/${encodeURIComponent(orcid)}`)
+}
+
+export function getSemanticScholarWorks(authorId: string, cursor?: string, perPage = 25) {
+  const params = new URLSearchParams({ per_page: String(perPage) })
+  if (cursor) params.set('cursor', cursor)
+  return request<OpenAlexWorksPage>(`/search/semantic-scholar/authors/${encodeURIComponent(authorId)}/works?${params}`)
+}
+
+export function searchCrossrefWorks(name: string) {
+  const params = new URLSearchParams({ name })
+  return request<OpenAlexWorksPage>(`/search/crossref/works?${params}`)
 }
 
 export function getOpenAlexWorks(authorId: string, page: number, perPage = 25) {
@@ -291,6 +307,7 @@ export interface Review {
   explanation: string | null
   decision: string | null
   created_at: string
+  decision_rationale?: string | null
 }
 
 export interface Publication {
@@ -315,24 +332,30 @@ export interface Publication {
 
 export interface OpenAlexAuthor {
   id: string
+  provider: 'openalex' | 'semantic_scholar' | 'institution'
   name: string
   orcid: string | null
   affiliation: string | null
   works_count: number | null
   cited_by_count: number | null
   source_url: string
-  identity_status: 'possible_name_match' | 'provider_identifier_matched'
+  linkedin_url?: string | null
+  identity_status: 'possible_name_match' | 'provider_identifier_matched' | 'institution_profile_match'
 }
 
 export interface OpenAlexAuthorSearch {
   results: OpenAlexAuthor[]
   count: number
   source: string
+  sources?: string[]
+  pagination?: { next_cursor?: string; has_more: boolean } | null
   retrieved_at: string
   warnings: string[]
 }
 
 export interface OpenAlexWork {
+  provider?: 'openalex' | 'semantic_scholar' | 'crossref'
+  provider_work_id?: string
   title: string
   doi: string | null
   publication_year: number | null
@@ -341,14 +364,14 @@ export interface OpenAlexWork {
   landing_url: string | null
   source_url: string
   citation_count: number | null
-  authors: Array<{ name: string; orcid: string | null }>
+  authors: Array<{ name: string; orcid?: string | null }>
 }
 
 export interface OpenAlexWorksPage {
   results: OpenAlexWork[]
   count: number
-  pagination: { page: number; next_page?: number; has_more: boolean; limit_reached?: boolean } | null
-  page: number
+  pagination?: { page?: number; next_page?: number; next_cursor?: string; has_more: boolean; limit_reached?: boolean } | null
+  page?: number
   source: string
   retrieved_at: string
 }

@@ -88,6 +88,7 @@ class OpenAlexConnector(BaseConnector):
         orcid: str | None = None,
         institution: str | None = None,
         name_variants: list[str] | None = None,
+        cursor: str | None = None,
     ) -> ConnectorResult:
         """Search OpenAlex for author candidates.
 
@@ -100,6 +101,7 @@ class OpenAlexConnector(BaseConnector):
         errors: list[str] = []
         request_count = 0
         rate_limited = False
+        next_cursor = None
 
         try:
             async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
@@ -139,7 +141,15 @@ class OpenAlexConnector(BaseConnector):
                         names_to_search.extend(name_variants[:3])  # Limit variant searches
 
                     for name in names_to_search:
-                        params = {**base_params, "search": name, "per_page": "10"}
+                        # OpenAlex returns only 10 authors by default. Use its
+                        # maximum page size so common names expose a useful
+                        # candidate set instead of silently stopping at ten.
+                        params = {
+                            **base_params,
+                            "search": name,
+                            "per_page": "200",
+                            "cursor": cursor or "*",
+                        }
                         if institution:
                             params["filter"] = (
                                 f"last_known_institutions.display_name.search:{institution}"
@@ -150,6 +160,7 @@ class OpenAlexConnector(BaseConnector):
 
                         if resp.status_code == 200:
                             data = resp.json()
+                            next_cursor = data.get("meta", {}).get("next_cursor")
                             for author in data.get("results", []):
                                 # Avoid duplicate candidates
                                 author_id = author.get("id", "")
@@ -176,6 +187,9 @@ class OpenAlexConnector(BaseConnector):
             return ConnectorResult(
                 status=status,
                 records=records,
+                pagination=(
+                    {"next_cursor": next_cursor, "has_more": True} if next_cursor else None
+                ),
                 request_count=request_count,
                 warnings=warnings,
                 errors=errors,
